@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Quórum — Estação Halcyon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hide">
+  <div id="hTasks"><small id="hCap"></small><div class="bar"><i id="hBar"></i></div><ul id="hList"></ul></div>
+  <div id="hObj"></div>
+  <div id="hSab" class="hide"></div>
+  <div id="mapbox"><canvas id="mini" width="220" height="127"></canvas><div id="mapOff">SEM SINAL</div></div>
+  <div id="acts">
+    <div id="abil"></div>
+    <button id="bSab" class="imp hide">SABOTAR<small>F</small></button>
+    <button id="bVent" class="imp hide">DUTO<small>V</small></button>
+    <button id="bNext" class="imp hide">PRÓXIMO<small>C</small></button>
+    <button id="bKill" class="imp hide">ELIMINAR<small>Q</small></button>
+    <button id="bRep">REPORTAR<small>R</small></button>
+    <button id="bUse" class="main">USAR<small>E</small></button>
+  </div>
+  <button id="bFull" aria-label="Tela cheia">⛶</button>
+  <div id="sabMenu" class="hide"><button data-s="lights">Apagão</button><button data-s="comms">Comunicação</button><button data-s="heat">Superaquecimento</button></div>
+</div>
+
+<section id="device" class="screen"><div class="panel narrow"><h2>Como você vai jogar?</h2><p class="hint">Isso ajusta controles e tamanho da interface. Dá para mudar depois em Configurações.</p><div class="stack"><button class="btn main" data-dev="mobile">📱 Celular</button><button class="btn main" data-dev="pc">💻 Computador</button></div></div></section>
+
+<section id="menu" class="screen on">
+  <div class="logo"><h1>QUÓRUM</h1><p>Estação Halcyon</p></div>
+  <div class="stack">
+    <input id="nameIn" maxlength="12" placeholder="Seu nome" autocomplete="off">
+    <button class="btn main" id="mPlay">JOGAR</button>
+    <button class="btn" id="mCreate">CRIAR SALA</button>
+    <button class="btn" id="mJoin">ENTRAR EM SALA</button>
+    <button class="btn" id="mCustom">PERSONALIZAÇÃO</button>
+    <button class="btn" id="mSettings">CONFIGURAÇÕES</button>
+  </div>
+</section>
+
+<section id="join" class="screen"><div class="panel narrow"><h2>Entrar em sala</h2><input id="codeIn" maxlength="4" placeholder="CÓDIGO" autocomplete="off" autocapitalize="characters" spellcheck="false"><div class="row"><button class="btn" data-back>VOLTAR</button><button class="btn main" id="jGo">ENTRAR</button></div></div></section>
+
+<section id="lobby" class="screen">
+  <div class="lobbyL"><div class="codebox">Código da sala <b id="lCode">----</b></div><canvas id="stage" width="900" height="420"></canvas><div id="lCount"></div><small id="lHint">Clique no seu personagem para trocar a roupa e a aparência</small></div>
+  <div class="panel lobbyR"><h2>Partida</h2><div id="lSet"></div>
+    <div class="row"><button class="btn" id="lCustom">APARÊNCIA</button><button class="btn" id="lJobs">PROFISSÕES</button><button class="btn" id="lLeave">SAIR</button></div>
+    <button class="btn main" id="lStart">COMEÇAR</button></div>
+</section>
+
+<section id="jobs" class="screen"><div class="panel wide2"><h2>Profissões e regras</h2><div class="row" id="jTabs"></div><div id="jBody"></div><div class="row"><button class="btn" data-back>VOLTAR</button></div></div></section>
+
+<section id="custom" class="screen"><div class="panel wide"><canvas id="prev" width="320" height="300"></canvas><div><h2>Personalização</h2><div id="cOpts"></div><div class="row"><button class="btn" data-back>VOLTAR</button><button class="btn main" id="cSave">SALVAR</button></div></div></div></section>
+
+<section id="settings" class="screen"><div class="panel narrow"><h2>Configurações</h2><div id="sOpts"></div>
+  <p class="hint">Mover: WASD / setas · Usar: E · Eliminar: Q · Reportar: R · Ventilação: V (C troca) · Sabotar: F</p>
+  <div class="row"><button class="btn" data-back>VOLTAR</button></div></div></section>
+
+<section id="meeting" class="screen"><div class="mHead"><b id="mTitle"></b><div class="tbar"><i id="mBar"></i></div></div>
+  <div class="mBody"><div id="mList"></div><div class="panel chat"><div id="chLog"></div><div class="row"><input id="chIn" maxlength="140" placeholder="Digite uma mensagem…" autocomplete="off"><button class="btn" id="chSend">ENVIAR</button></div></div></div>
+  <div class="mFoot"><button class="btn" id="mMap">🗺 MAPA</button><button class="btn main" id="mVote" disabled>VOTAR</button><button class="btn" id="mSup" hidden>VOTO SUPREMO</button><button class="btn" id="mSkip">PULAR VOTO</button><span id="mAb"></span><span id="mNote"></span></div>
+  <div id="eject"></div></section>
+
+<section id="end" class="screen"><div class="endbox"><h1 id="eTitle"></h1><p id="eReason"></p><div id="eList"></div><small>Voltando ao lobby…</small></div></section>
+
+<div id="camUI" class="hide"><span>● CÂMERAS DE SEGURANÇA</span><button id="cExit">SAIR (E)</button></div>
+<div id="pick"><div class="card"><div class="ttl"><b id="pkT"></b><button class="x" id="pkX" aria-label="Fechar">✕</button></div><div id="pkL"></div></div></div>
+<canvas id="bigmap" width="880" height="510" class="hide"></canvas>
+<div id="joyZone" class="hide"><div id="joyBase"><i id="joyKnob"></i></div></div>
+<div id="rot">📱 Gire o celular para jogar na horizontal</div>
+<div id="ver">v0.5 (Beta)</div>
+<div id="intro"></div><div id="task"></div><div id="toast"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

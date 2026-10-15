@@ -31,6 +31,9 @@ O host configura no lobby (botão PROFISSÕES): chance e máximo de cada profiss
 ## Mentalista
 Tem dois painéis: **PAINEL** (igual ao do Cientista: vivo/morto, usos por reunião) e **PROFISSÕES** (desbloqueia ao completar todas as tarefas; mostra nome, profissão e vivo/morto de todos; só abre durante as reuniões). A sondagem individual continua revelando a profissão de quem ficar parado.
 
+## Botão de emergência e reuniões
+O botão tem recarga (padrão 20 s, configurável no lobby) no início e depois de cada reunião; durante a recarga o botão mostra os segundos. Ao reportar um corpo ou apertar o botão há uma cena em tela cheia. Desconexões não matam mais: o jogador fica offline por até 150 s (aparece "OFFLINE" na reunião) antes de ser removido, e o servidor registra `[morte]` e `[saiu]` nos logs.
+
 ## Dispositivo
 Na primeira vez o jogo pergunta se você joga no **Celular** ou no **Computador** (dá para trocar em Configurações). Computador usa teclado e layout compacto/centralizado; Celular usa joystick e botões de toque.
 

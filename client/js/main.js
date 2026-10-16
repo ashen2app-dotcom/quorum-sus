@@ -18,7 +18,7 @@ const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new S
   players: new Map(), bodies: [], myTasks: [], sab: null, vr: 900, look: P.look, name: P.name, acting: 0, cd: [0, 0], intro: 0, tk: [0, 1], settings: { speed: 1, emergencies: 1 },
   emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null, cams: null, camsOn: false, view: null, introEnd: 0, bg: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y }, jobPanel: false, joy: { x: 0, y: 0 }, touch: false };
 const send = o => net.send(o);
-Object.assign(S, { deadKnown: new Set(), meetPos: null, meetBody: null });
+Object.assign(S, { deadKnown: new Set(), meetPos: null, meetBody: null, emergCd: 0 });
 initRender($('game'));
 
 // ---------- navegação ----------
@@ -62,7 +62,7 @@ addEventListener('pointerdown', () => initAudio(), { once: true });
 // ---------- mensagens do servidor ----------
 net.on('hello', m => { S.id = m.id; sessionStorage.setItem('quorum.s', JSON.stringify({ code: m.code, token: m.token })); });
 net.on('err', m => UI.toast(m.msg));
-net.on('norejoin', () => sessionStorage.removeItem('quorum.s'));
+net.on('norejoin', () => { sessionStorage.removeItem('quorum.s'); if (S.phase !== 'menu' && S.phase !== 'lobby') toMenu('Você foi removido da partida.'); });
 net.on('lobby', m => {
   S.lobby = m; S.roster = new Map(m.players.map(p => [p.id, p]));
   if (S.phase !== 'lobby') { S.phase = 'lobby'; S.hideMe = true; S.me.alive = false; $('hud').classList.add('hide'); closeTaskUi(); alarm(false); UI.closeMeeting(); go('lobby'); }
@@ -98,7 +98,7 @@ function intro() {
 net.on('snap', m => {
   if (S.phase !== 'play') return;
   const [x, y, vent, ap, inv, sh] = m.you, me = S.me, d = Math.hypot(x - me.x, y - me.y); me.vent = vent; S.meInv = !!inv; S.meShield = sh; { const mr = S.roster.get(ap); if (mr) { S.look = mr.look; S.name = mr.name; } }
-  if (d > 120 || vent >= 0) { me.x = x; me.y = y; } else if (d > 36) { me.x += (x - me.x) * 0.15; me.y += (y - me.y) * 0.15; } else if (!me.moving) { me.x += (x - me.x) * 0.3; me.y += (y - me.y) * 0.3; }
+  { const lag = 190 * (S.settings.speed || 1) * ((S.rtt || 80) / 2000 + 0.12) + 24; if (vent >= 0 || d > Math.max(170, lag * 3)) { me.x = x; me.y = y; } else if (d > lag) { me.x += (x - me.x) * 0.12; me.y += (y - me.y) * 0.12; } else if (!me.moving) { me.x += (x - me.x) * 0.25; me.y += (y - me.y) * 0.25; } }
   const seen = new Set();
   for (const [id, px, py, f, mv, g, ap, iv] of m.pl) {
     seen.add(id); let p = S.players.get(id); if (!p) { p = { x: px, y: py }; S.players.set(id, p); }
@@ -106,7 +106,7 @@ net.on('snap', m => {
   }
   for (const id of [...S.players.keys()]) if (!seen.has(id)) S.players.delete(id);
   S.bodies = m.bd.map(([id, bx, by, bg]) => ({ id, x: bx, y: by, g: !!bg, look: (S.roster.get(id) || { look: P.look }).look })); for (const b of S.bodies) S.deadKnown.add(b.id);
-  const hadSab = S.sab; S.sab = m.sab; S.vr = m.vr; S.cd = m.cd || [0, 0]; S.tk = m.tk; S.intro = m.intro; S.ab = m.ab; S.loc = m.loc; S.probe = m.probe; S.sup = m.ab.sup;
+  const hadSab = S.sab; S.sab = m.sab; S.vr = m.vr; S.cd = m.cd || [0, 0]; S.tk = m.tk; S.emergCd = m.ec | 0; S.intro = m.intro; S.ab = m.ab; S.loc = m.loc; S.probe = m.probe; S.sup = m.ab.sup;
   S.cams = m.cams || null; S.camsOn = !!m.co; $('hud').classList.toggle('incam', !!m.cams); $('camUI').classList.toggle('hide', !m.cams);
   S.arrows = buildArrows(m, vent);
   if (!!hadSab !== !!S.sab || hadSab?.k !== S.sab?.k) alarm(S.sab?.k === 'heat');
@@ -127,24 +127,29 @@ net.on('chat', m => UI.addChat(m, S.roster));
 net.on('result', m => { S.phase = 'result'; UI.showResult(m, S.roster); });
 net.on('play', () => { S.phase = 'play'; S.hideMe = false; S.view = null; UI.closeMeeting(); go(null); $('hud').classList.remove('hide'); S.players.clear(); S.hideMe = false; sfx('ok'); S._ej = null; buildAbil(); });
 net.on('end', m => { S.phase = 'end'; closeTaskUi(); alarm(false); $('hud').classList.add('hide'); A.mode = null; UI.showEnd(m, S.roster, { team: S.team, job: S.job }); $('bigmap').classList.add('hide'); });
-net.on('close', () => {
-  if (S.phase === 'menu') return; const s = JSON.parse(sessionStorage.getItem('quorum.s') || 'null'); if (!s) return toMenu('Conexão encerrada.');
-  UI.toast('Conexão perdida. Reconectando…'); let n = 0;
-  const retry = async () => { if (++n > 20) return toMenu('Não foi possível reconectar.'); try { await net.connect(); send({ t: 'rejoin', code: s.code, token: s.token }); } catch { setTimeout(retry, 2000); } };
-  retry();
-});
+let reconnecting = false;
+async function reconnect() {
+  if (reconnecting || S.phase === 'menu') return; const s = JSON.parse(sessionStorage.getItem('quorum.s') || 'null'); if (!s) return toMenu('Conexão encerrada.');
+  reconnecting = true; UI.toast('Conexão perdida. Reconectando…', 4000);
+  for (let n = 0; n < 70; n++) { try { await net.connect(); send({ t: 'rejoin', code: s.code, token: s.token }); reconnecting = false; return; } catch { await new Promise(r => setTimeout(r, 2000)); } }
+  reconnecting = false; toMenu('Não foi possível reconectar.');
+}
+net.on('close', reconnect);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.phase !== 'menu' && !net.open) reconnect(); });
+addEventListener('online', () => { if (S.phase !== 'menu' && !net.open) reconnect(); });
 { const s = JSON.parse(sessionStorage.getItem('quorum.s') || 'null'); if (s) net.connect().then(() => send({ t: 'rejoin', code: s.code, token: s.token })).catch(() => { }); }
 
 // ---------- entrada ----------
-const keys = new Set(); let closeTask = null, lastIn = '', inT = 0;
+const keys = new Set(); let closeTask = null, lastIn = '', inT = 0, lastSendAt = 0;
 const closeTaskUi = () => { closeTask?.(false); closeTask = null; };
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return; keys.add(e.code); if (S.phase !== 'play' || closeTask || S.intro > 0 || performance.now() < S.introEnd) return; if (S.cams) { camKey(e.code); return; }
   ({ Digit1: () => abilN(0), Digit2: () => abilN(1), Digit3: () => abilN(2), Digit4: () => abilN(3), KeyM: toggleMap, KeyE: doUse, KeyR: doReport, KeyQ: doKill, KeyV: doVent, KeyC: () => S.me.vent >= 0 && send({ t: 'vent', a: 'next' }), KeyF: () => S.role === 'imp' && $('sabMenu').classList.toggle('hide') })[e.code]?.();
 });
 addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
-$('bUse').onclick = () => doUse(); $('bRep').onclick = () => doReport(); $('bKill').onclick = () => doKill(); $('bVent').onclick = () => doVent(); $('bSab').onclick = () => $('sabMenu').classList.toggle('hide');
-$('sabMenu').onclick = e => { const k = e.target.dataset.s; if (k) { send({ t: 'sabotage', k }); $('sabMenu').classList.add('hide'); } };
+function press(el, fn) { el.addEventListener('pointerdown', e => { if (el.disabled) return; e.preventDefault(); fn(e); }); el.addEventListener('click', e => e.preventDefault()); }
+press($('bUse'), () => doUse()); press($('bRep'), () => doReport()); press($('bKill'), () => doKill()); press($('bVent'), () => doVent()); press($('bSab'), () => $('sabMenu').classList.toggle('hide'));
+$('sabMenu').addEventListener('pointerdown', e => { const k = e.target.dataset.s; if (k) { e.preventDefault(); send({ t: 'sabotage', k }); $('sabMenu').classList.add('hide'); } });
 
 // ---------- ações contextuais ----------
 function nearAction() {
@@ -159,7 +164,7 @@ function nearAction() {
   for (const t of S.myTasks) if (!t.done) { const s = STATIONS.find(q => q.id === t.id), d = dist(me, s); if (d < bd) { bd = d; best = { label: 'TAREFA', run: () => startTask(t) }; } }
   if (best) return best;
   if (me.alive && !S.cams && dist(me, SPECIAL.camConsole) < 90) return { label: 'CÂMERAS', run: () => send({ t: 'ab', a: 'cam' }) };
-  if (me.alive && dist(me, SPECIAL.emergency) < 100 && S.emergUsed < S.settings.emergencies && S.sab?.k !== 'heat') return { label: 'EMERGÊNCIA', run: () => { S.emergUsed++; send({ t: 'emergency' }); } };
+  if (me.alive && dist(me, SPECIAL.emergency) < 100 && S.emergUsed < S.settings.emergencies && S.sab?.k !== 'heat') return S.emergCd > 0 ? { label: `EMERG. ${S.emergCd}s`, off: true, run() { } } : { label: 'EMERGÊNCIA', run: () => { S.emergUsed++; send({ t: 'emergency' }); } };
   return null;
 }
 function startTask(t) {
@@ -190,7 +195,7 @@ function hud(dt) {
   const sb = $('hSab'); sb.classList.toggle('hide', !sab);
   if (sab) sb.textContent = sab.k === 'lights' ? 'APAGÃO — restaure a energia nos Geradores' : sab.k === 'comms' ? 'COMUNICAÇÃO INTERROMPIDA — vá a Comunicações' : `SUPERAQUECIMENTO ${sab.t}s — repare em Engenharia e Sala de Controle`;
   $('mapOff').style.display = sab?.k === 'comms' ? 'flex' : 'none';
-  const act = nearAction(), u = $('bUse'); u.disabled = !act || !!closeTask; u.firstChild.textContent = act ? act.label : 'USAR'; u.classList.toggle('rdy', !!act);
+  const act = nearAction(), u = $('bUse'); u.disabled = !act || act.off || !!closeTask; u.firstChild.textContent = act ? act.label : 'USAR'; u.classList.toggle('rdy', !!act);
   const rep = $('bRep'); rep.disabled = !bodyNear(); rep.classList.toggle('rdy', bodyNear());
   if (imp) {
     const tg = killTarget() != null, k = $('bKill'); k.disabled = !me.alive || S.cd[0] > 0 || !tg; k.classList.toggle('rdy', !k.disabled); k.querySelector('small').textContent = S.cd[0] ? `${S.cd[0]}s` : 'Q';
@@ -214,7 +219,8 @@ function update(dt) {
   let ix = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0), iy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
   if (S.joy.x || S.joy.y) { ix = S.joy.x; iy = S.joy.y; }
   if (closeTask || S.intro > 0 || me.vent >= 0 || S.cams || performance.now() < S.introEnd) ix = iy = 0;
-  const key = ix + ',' + iy; inT -= dt; if (key !== lastIn || inT <= 0) { send({ t: 'input', x: ix, y: iy }); lastIn = key; inT = 0.1; }
+  if (ix || iy) { const a = Math.round(Math.atan2(iy, ix) / (Math.PI / 8)) * (Math.PI / 8); ix = +Math.cos(a).toFixed(2); iy = +Math.sin(a).toFixed(2); } // 16 direções: movimento estável e poucas mensagens
+  const key = ix + ',' + iy, nowT = performance.now(); inT -= dt; if (inT <= 0 || (key !== lastIn && ((!ix && !iy) || nowT - lastSendAt > 60))) { send({ t: 'input', x: ix, y: iy }); lastIn = key; lastSendAt = nowT; inT = 0.25; }
   const l = Math.hypot(ix, iy); me.moving = l > 0;
   if (l) {
     const k = (190 * S.settings.speed * dt) / l, dx = ix * k, dy = iy * k; if (dx) me.face = dx > 0 ? 1 : -1;
@@ -233,12 +239,12 @@ const effJob = () => (S.me.alive ? S.job : S.ghostJob);
 const nearP = r => { let b = null, bd = r; for (const p of S.players.values()) if (!p.ghost && dist(S.me, p) < bd) { b = p; bd = dist(S.me, p); } return b; };
 function buildAbil() {
   const box = $('abil'); box.innerHTML = '';
-  (ABIL[effJob()] || []).forEach(([id, label], i) => { const b = document.createElement('button'); b.dataset.id = id; b.dataset.k = i + 1; b.append(document.createTextNode(label)); const sm = document.createElement('small'); sm.textContent = i + 1; b.append(sm); b.onclick = () => useAbility(id); box.append(b); });
+  (ABIL[effJob()] || []).forEach(([id, label], i) => { const b = document.createElement('button'); b.dataset.id = id; b.dataset.k = i + 1; b.append(document.createTextNode(label)); const sm = document.createElement('small'); sm.textContent = i + 1; b.append(sm); press(b, () => useAbility(id)); box.append(b); });
 }
 function buildMeetAb() {
   const box = $('mAb'); box.innerHTML = '';
   if (S.job === 'mentalista' && S.jobPanel && S.me.alive) { const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'PROFISSÕES'; b.onclick = () => send({ t: 'ab', a: 'jobpanel' }); box.append(b); }
-  for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; b.onclick = () => useAbility(id); box.append(b); }
+  for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; press(b, () => useAbility(id)); box.append(b); }
 }
 function updAbil(me) {
   const ab = S.ab, v = $('bVent'), cv = canVent() && me.alive; v.classList.toggle('hide', !cv);
@@ -316,6 +322,8 @@ function endJoy(e) { if (e.pointerId !== jp) return; jp = null; S.joy = { x: 0, 
 zone.addEventListener('pointerdown', e => { if (jp !== null) return; jp = e.pointerId; try { zone.setPointerCapture(jp); } catch { } jo = { x: e.clientX, y: e.clientY }; jbase.style.display = 'block'; jbase.style.left = jo.x + 'px'; jbase.style.top = jo.y + 'px'; moveJoy(e); });
 zone.addEventListener('pointermove', e => { if (e.pointerId === jp) moveJoy(e); });
 zone.addEventListener('pointerup', endJoy); zone.addEventListener('pointercancel', endJoy);
+zone.addEventListener('lostpointercapture', endJoy); addEventListener('blur', () => { if (jp !== null) endJoy({ pointerId: jp }); }); document.addEventListener('visibilitychange', () => { if (document.hidden && jp !== null) endJoy({ pointerId: jp }); });
+addEventListener('contextmenu', e => { if (S.touch) e.preventDefault(); });
 let lastJoyShow = null, lastIngame = null;
 function touchUi() {
   if (S.phase !== 'play' && !big.classList.contains('hide')) drawBig();
@@ -324,13 +332,15 @@ function touchUi() {
   const ing = S.phase === 'play'; if (ing !== lastIngame) { lastIngame = ing; document.body.classList.toggle('ingame', ing); }
 }
 $('bFull').onclick = () => { const d = document.documentElement; (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d); screen.orientation?.lock?.('landscape').catch(() => { }); };
-$('bNext').onclick = () => send({ t: 'vent', a: 'next' });
+press($('bNext'), () => send({ t: 'vent', a: 'next' }));
 $('mapbox').onclick = () => toggleMap(); $('hTasks').onclick = () => $('hTasks').classList.toggle('open');
 // ---------- mapa durante a votação, mortos conhecidos ----------
-net.on('meeting', m => { for (const id of m.dead) S.deadKnown.add(id); S.meetPos = { x: S.me.x, y: S.me.y }; S.meetBody = m.bpos ? { x: m.bpos[0], y: m.bpos[1] } : null; });
+net.on('meeting', m => { for (const id of m.dead) S.deadKnown.add(id); S.meetPos = { x: S.me.x, y: S.me.y }; S.meetBody = m.bpos ? { x: m.bpos[0], y: m.bpos[1] } : null; UI.meetScene(m, S.roster); });
 net.on('result', m => { if (m.ejected != null) S.deadKnown.add(m.ejected); big.classList.add('hide'); });
 for (const t of ['panel', 'jobpanel']) net.on(t, m => m.list.forEach(r => { if (!r[r.length - 1]) S.deadKnown.add(r[0]); }));
 $('mMap').onclick = () => { big.classList.toggle('hide'); if (!big.classList.contains('hide')) drawBig(); };
+setInterval(() => { if (net.open) send({ t: 'ping', ts: performance.now() }); }, 2000);
+net.on('pong', m => { const r = performance.now() - m.ts; S.rtt = S.rtt ? S.rtt * 0.7 + r * 0.3 : r; });
 net.on('hint', m => UI.toast(m.text, 7000));
 net.on('unlock', () => { S.jobPanel = true; UI.toast('Painel de profissões desbloqueado! Abra-o durante as reuniões.', 6000); sfx('ok'); });
 net.on('jobpanel', m => UI.pick('Painel de profissões', m.list.map(([id, job, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: `${JOB[job].name} · ${al ? 'VIVO' : 'MORTO'}`, dead: !al })), null));

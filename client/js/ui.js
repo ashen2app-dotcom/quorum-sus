@@ -17,7 +17,7 @@ export function setAnim(fn) { animFn = fn; if (fn && !raf) raf = requestAnimatio
 // ---------- lobby ----------
 const SET = [['impostors', 'Infiltrados', 0, 3, 1, v => v || 'Auto'], ['speed', 'Velocidade', 0.75, 1.5, 0.25, v => v + 'x'], ['vision', 'Visão', 0.5, 1.5, 0.25, v => v + 'x'],
   ['discuss', 'Tempo de discussão', 10, 120, 5, v => v + 's'], ['vote', 'Tempo de votação', 10, 120, 5, v => v + 's'], ['tasks', 'Tarefas por jogador', 1, 8, 1, v => v],
-  ['killCd', 'Recarga da eliminação', 10, 45, 1, v => v + 's'], ['emergencies', 'Reuniões de emergência', 0, 3, 1, v => v], ['confirm', 'Revelar função do expulso', 0, 1, 1, v => (v ? 'Sim' : 'Não')]];
+  ['killCd', 'Recarga da eliminação', 10, 45, 1, v => v + 's'], ['emergencies', 'Reuniões de emergência', 0, 3, 1, v => v], ['emergCd', 'Recarga do botão de emergência', 0, 60, 5, v => v + 's'], ['confirm', 'Revelar função do expulso', 0, 1, 1, v => (v ? 'Sim' : 'Não')]];
 let LB = null;
 export const STAGE = { hits: [] };
 export function renderLobby(L, myId, send, minPlayers = 4) {
@@ -81,7 +81,7 @@ export function openMeeting(m, ctx) {
   for (const [id, p] of ctx.roster) {
     const dead = !m.alive.includes(id), card = el('div', 'card2' + (dead ? ' dead' : '')), cv = el('canvas'); cv.width = 100; cv.height = 124;
     drawCrew(cv.getContext('2d'), p.look, 50, 118, { s: 1.4, ghost: dead, alpha: dead ? 0.6 : 1, dead });
-    card.append(cv, el('div', 'nm', p.name), el('div', 'vs')); if (ctx.mates && ctx.mates.has(id) && id !== ctx.me) card.append(el('span', 'chip ally', 'ALIADO'));
+    card.append(cv, el('div', 'nm', p.name), el('div', 'vs')); if (ctx.mates && ctx.mates.has(id) && id !== ctx.me) card.append(el('span', 'chip ally', 'ALIADO')); if (m.off && m.off.includes(id)) card.append(el('span', 'chip off', 'OFFLINE')); else if (m.gone && m.gone.includes(id)) card.append(el('span', 'chip off', 'SAIU'));
     card.onclick = () => { if (M.phase !== 'vote' || dead || M.voted || !ctx.alive) return; M.sel = id; M.cards.forEach(c => c.classList.remove('sel')); card.classList.add('sel'); $('mVote').disabled = false; sfx('click'); };
     M.cards.set(id, card); list.append(card);
   }
@@ -205,5 +205,42 @@ export function killScene(kLook, vLook, role) {
     if (t < 0.1) { c.fillStyle = `rgba(255,255,255,${0.7 - t * 7})`; c.fillRect(0, 0, W, H); }
     if (victim && t > 1.35) { const a = Math.min(1, (t - 1.35) / 0.35); c.globalAlpha = a; c.fillStyle = '#ff4f6d'; c.textAlign = 'center'; c.font = `800 ${Math.max(28, Math.min(W, H) / 8)}px "Baloo 2",system-ui,sans-serif`; c.shadowColor = '#000'; c.shadowBlur = 14; c.fillText('VOCÊ FOI ELIMINADO', W / 2, H * 0.26); c.globalAlpha = 1; c.shadowBlur = 0; }
     kRaf = requestAnimationFrame(frame);
+  })(t0);
+}
+
+// ---------- cenas de reunião: report de corpo / botão de emergência ----------
+let mRaf = 0;
+export function meetScene(m, roster) {
+  document.getElementById('meetc')?.remove(); cancelAnimationFrame(mRaf);
+  const cv = document.createElement('canvas'); cv.id = 'meetc'; cv.width = innerWidth; cv.height = innerHeight; document.body.append(cv);
+  const c = cv.getContext('2d'), W = cv.width, H = cv.height, sc = Math.min(W, H) / 150, t0 = performance.now(), DUR = 2.4, body = m.reason === 'body', gy = H * 0.76, by = roster.get(m.by), vic = body ? roster.get(m.body) : null;
+  const FB = { c: 0, h: 0, o: 0, a: 0, m: 0, s: 0 }, ease = x => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3); sfx(body ? 'report' : 'meeting');
+  (function frame(now) {
+    const t = (now - t0) / 1000; if (t > DUR) { cv.remove(); return; }
+    cv.style.opacity = t > DUR - 0.45 ? (DUR - t) / 0.45 : 1; c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = body ? '#12060a' : '#0a0710'; c.fillRect(0, 0, W, H);
+    const g = c.createRadialGradient(W / 2, H / 2, H * 0.2, W / 2, H / 2, Math.max(W, H) * 0.75); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(255,40,60,${0.3 + 0.22 * Math.sin(t * 13)})`); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    c.fillStyle = 'rgba(255,255,255,.05)'; c.fillRect(0, gy, W, H - gy);
+    const walk = ease(t / 0.75), rx = -W * 0.12 + (W * (body ? 0.38 : 0.36) + W * 0.12) * walk, arrived = t > 0.75;
+    let sx = 0, sy = 0; if ((!body && t > 0.9 && t < 1.25) || (body && t > 0.75 && t < 1.0)) { sx = (Math.random() - 0.5) * 14; sy = (Math.random() - 0.5) * 14; } c.save(); c.translate(sx, sy);
+    if (body) {
+      c.save(); c.translate(W * 0.62, gy); c.rotate(1.5); c.scale(sc, sc); drawCrew(c, vic?.look || FB, 0, 0, { t, dead: true, face: -1 }); c.restore();
+      c.save(); c.translate(rx, gy); c.scale(sc, sc); drawCrew(c, by?.look || FB, 0, 0, { t, moving: !arrived, face: 1, act: arrived ? 0.001 : 0 }); c.restore();
+      if (arrived) { c.fillStyle = '#ffd23d'; c.font = `800 ${34 * sc * 0.6}px "Baloo 2",sans-serif`; c.textAlign = 'center'; for (let i = 0; i < 3; i++) c.fillText('!', rx + 34 * sc + i * 15 * sc * 0.6, gy - 52 * sc - i * 7 * sc * 0.4 + Math.sin(t * 9 + i) * 6 * sc * 0.4); }
+    } else {
+      const bx = W * 0.6, press = t > 0.9 ? Math.min(1, (t - 0.9) / 0.12) : 0;
+      c.fillStyle = '#1f2640'; c.fillRect(bx - 36 * sc, gy - 22 * sc, 72 * sc, 22 * sc); c.fillStyle = '#323c66'; c.fillRect(bx - 36 * sc, gy - 22 * sc, 72 * sc, 4 * sc);
+      c.fillStyle = '#c91f3d'; c.beginPath(); c.ellipse(bx, gy - 22 * sc, 26 * sc, 5 * sc, 0, 0, 6.3); c.fill();
+      const h = (17 - 11 * press) * sc; c.fillStyle = press ? '#ff6b86' : '#ff2f4f'; c.beginPath(); c.ellipse(bx, gy - 24 * sc, 23 * sc, h, 0, Math.PI, 0); c.fill(); c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.ellipse(bx - 8 * sc, gy - 24 * sc - h * 0.55, 7 * sc, 3 * sc, 0, 0, 6.3); c.fill();
+      if (t > 0.9) for (let i = 0; i < 3; i++) { const k = (t - 0.9 - i * 0.14) / 0.7; if (k > 0 && k < 1) { c.strokeStyle = `rgba(255,70,90,${1 - k})`; c.lineWidth = 5; c.beginPath(); c.ellipse(bx, gy - 24 * sc, 30 * sc + k * 110 * sc, 12 * sc + k * 40 * sc, 0, 0, 6.3); c.stroke(); } }
+      c.save(); c.translate(rx, gy); c.scale(sc, sc); drawCrew(c, by?.look || FB, 0, 0, { t, moving: !arrived, face: 1, act: arrived ? 0.001 : 0 }); c.restore();
+    }
+    c.restore();
+    const tt = t < 0.25 ? 2.6 - t / 0.25 * 1.6 : 1, a = Math.min(1, t / 0.2); c.save(); c.globalAlpha = a; c.translate(W / 2, H * 0.2); c.scale(tt, tt); c.textAlign = 'center'; c.lineJoin = 'round';
+    c.font = `800 ${Math.max(26, Math.min(W / 14, H / 6))}px "Baloo 2",system-ui,sans-serif`; c.lineWidth = 10; c.strokeStyle = '#000'; const title = body ? 'CORPO ENCONTRADO!' : 'REUNIÃO DE EMERGÊNCIA'; const fit = Math.min(1, W * 0.9 / Math.max(1, c.measureText(title).width * tt)); c.scale(fit, fit); c.strokeText(title, 0, 0); c.fillStyle = body ? '#ff4f6d' : (Math.sin(t * 16) > 0 ? '#ff4f6d' : '#ffd23d'); c.fillText(title, 0, 0); c.restore();
+    if (t > 0.6 && by) { c.globalAlpha = Math.min(1, (t - 0.6) / 0.3); c.fillStyle = '#e9f1ff'; c.textAlign = 'center'; c.font = `700 ${Math.max(16, Math.min(W / 30, H / 14))}px "Baloo 2",system-ui,sans-serif`; c.fillText(body ? `${by.name} reportou${vic ? ' ' + vic.name : ''}` : `${by.name} apertou o botão`, W / 2, H * 0.2 + Math.max(28, H / 12)); c.globalAlpha = 1; }
+    if (t < 0.1) { c.fillStyle = `rgba(255,255,255,${0.7 - t * 7})`; c.fillRect(0, 0, W, H); }
+    if (!body && t > 0.92 && t < 1.02) { c.fillStyle = 'rgba(255,60,80,.45)'; c.fillRect(0, 0, W, H); }
+    mRaf = requestAnimationFrame(frame);
   })(t0);
 }

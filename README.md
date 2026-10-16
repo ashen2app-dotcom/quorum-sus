@@ -34,6 +34,9 @@ Tem dois painéis: **PAINEL** (igual ao do Cientista: vivo/morto, usos por reuni
 ## Botão de emergência e reuniões
 O botão tem recarga (padrão 20 s, configurável no lobby) no início e depois de cada reunião; durante a recarga o botão mostra os segundos. Ao reportar um corpo ou apertar o botão há uma cena em tela cheia. Desconexões não matam mais: o jogador fica offline por até 150 s (aparece "OFFLINE" na reunião) antes de ser removido, e o servidor registra `[morte]` e `[saiu]` nos logs.
 
+## Toque (celular)
+Os botões reagem ao toque imediato, mesmo com o dedo no joystick (não precisa parar de andar para eliminar, reportar ou chamar reunião). O movimento sai em 16 direções com poucas mensagens, o servidor para sozinho quem fica sem avisar o cliente por 0,7 s, e a correção de posição leva em conta a latência (sem vai e vem).
+
 ## Dispositivo
 Na primeira vez o jogo pergunta se você joga no **Celular** ou no **Computador** (dá para trocar em Configurações). Computador usa teclado e layout compacto/centralizado; Celular usa joystick e botões de toque.
 

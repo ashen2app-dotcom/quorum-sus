@@ -8,10 +8,10 @@ import { JOBS, JOB, DEFAULT_SETTINGS, SETTING_LIMITS, colorTone, INF_MSGS } from
 export const MIN_PLAYERS = +process.env.MIN_PLAYERS || 4;
 const MAX_PLAYERS = 15;
 const BASE_SPEED = 190, BASE_VIS = 420, KILL_R = 95, REPORT_R = 150, TASK_R = 110, FIX_R = 110, VENT_R = 80, PROBE_R = 110, CAM_R = 300;
-const DC_GRACE = 45, SAB_CD = 30, HEAT_TIME = 45, INTRO = 4.2, RESULT_TIME = 8, END_TIME = 12;
+const DC_GRACE = 150, SAB_CD = 30, HEAT_TIME = 45, INTRO = 4.2, RESULT_TIME = 8, END_TIME = 12;
 const GEN_NAMES = ['Ashen', 'Shadow', 'Nexus', 'Ghost', 'Dark', 'Lunar', 'Venom', 'Zero', 'Pixel', 'Orion', 'Blaze', 'Echo', 'Nova', 'Rift', 'Onyx', 'Frost', 'Vortex', 'Comet', 'Rogue', 'Mira', 'Kairo', 'Luna', 'Thor', 'Zeca', 'Duda', 'Bruno', 'Lari', 'Gabs', 'Tiago', 'Nina', 'Kiko', 'Rafa', 'Bia', 'Dani', 'Leo', 'Mel', 'Pedro', 'Sol', 'Vini', 'Yuri'];
-const DEFAULTS = { impostors: 0, speed: 1, vision: 1, discuss: 30, vote: 30, tasks: 4, killCd: 22, emergencies: 1, confirm: 1, ...DEFAULT_SETTINGS };
-const LIMITS = { impostors: [0, 3], speed: [0.75, 1.5], vision: [0.5, 1.5], discuss: [10, 120], vote: [10, 120], tasks: [1, 8], killCd: [10, 45], emergencies: [0, 3], confirm: [0, 1], ...SETTING_LIMITS };
+const DEFAULTS = { impostors: 0, speed: 1, vision: 1, discuss: 30, vote: 30, tasks: 4, killCd: 22, emergencies: 1, emergCd: 20, confirm: 1, ...DEFAULT_SETTINGS };
+const LIMITS = { impostors: [0, 3], speed: [0.75, 1.5], vision: [0.5, 1.5], discuss: [10, 120], vote: [10, 120], tasks: [1, 8], killCd: [10, 45], emergencies: [0, 3], emergCd: [0, 60], confirm: [0, 1], ...SETTING_LIMITS };
 
 const rnd = n => Math.floor(Math.random() * n);
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -139,7 +139,7 @@ export class Room {
         killedBy: null, deathRoom: '', seen: new Set(), revealed: false, sciWait: false, watch: false,
         tasks: q.team === 'neu' ? [] : shuffle([...STATIONS]).slice(0, S.tasks).map(s => ({ id: s.id, type: s.type, name: s.name, room: s.room, done: false })) });
     });
-    Object.assign(this, { phase: 'play', bodies: [], sab: null, sabCd: 25, intro: INTRO, meet: null, supreme: null, ghostN: {}, last: Date.now(), n: 0 });
+    Object.assign(this, { phase: 'play', bodies: [], sab: null, sabCd: 25, emergCd: this.settings.emergCd, intro: INTRO, meet: null, supreme: null, ghostN: {}, last: Date.now(), n: 0 });
     for (const q of this.list) this.send(q, { t: 'start', ...this.startPayload(q) });
     clearInterval(this.loop); this.loop = setInterval(() => this.tick(), 33);
   }
@@ -158,6 +158,7 @@ export class Room {
         for (const p of this.list) { this.move(p, dt); this.cool(p, dt); }
         this.bodyTick(dt);
         if (this.sabCd > 0 && !this.sab) this.sabCd -= dt;
+        if (this.emergCd > 0) this.emergCd -= dt;
         if (this.sab?.k === 'heat') { this.sab.t -= dt; if (this.sab.t <= 0) return this.end('imp', 'O superaquecimento destruiu a estação.'); }
       }
       if (this.n % 2 === 0) this.snapshot();
@@ -183,6 +184,7 @@ export class Room {
   }
   move(p, dt) {
     if (p.gone || p.vent >= 0 || p.watch) { if (p.watch) p.moving = false; return; }
+    if (!p.bot && p.inAt && Date.now() - p.inAt > 700) p.ix = p.iy = 0; // sem notícias do cliente: para (evita boneco andando sozinho)
     const l = Math.hypot(p.ix, p.iy); p.moving = l > 0.05;
     if (!p.moving) return;
     const k = Math.min(1, 1 / l) * BASE_SPEED * this.settings.speed * dt, dx = p.ix * k, dy = p.iy * k;
@@ -222,7 +224,7 @@ export class Room {
       if (v.watch) cams = CAMS.map(c => { const o = { x: c.vx, y: c.vy }; return [this.list.filter(p => p.alive && !p.gone && p.vent < 0 && !(p.act.invis > 0) && dist(p, o) <= CAM_R).map(p => [p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.morph || p.id]), this.bodies.filter(b => dist(b, o) <= CAM_R).map(b => [b.id, b.x | 0, b.y | 0, b.g ? 1 : 0])]; });
       if (v.vent >= 0 && v.alive) vd = this.list.filter(p => p !== v && p.alive && !p.gone && dist(p, v) <= 1600).map(p => +Math.atan2(p.y - v.y, p.x - v.x).toFixed(2));
       const tr = v.track && this.players.get(v.track); const loc = tr && tr.alive && v.act.locate > 0 ? [tr.x | 0, tr.y | 0, tr.id] : null;
-      this.send(v, { t: 'snap', you: [v.x | 0, v.y | 0, v.vent, v.morph || v.id, v.act.invis > 0 ? 1 : 0, Math.ceil(v.shieldT > 0 ? v.shieldT : 0)], pl, bd, tk, sab: sab || null, vr: Math.round(vrr), ar: arrows, loc,
+      this.send(v, { t: 'snap', ec: Math.ceil(Math.max(0, this.emergCd || 0)), you: [v.x | 0, v.y | 0, v.vent, v.morph || v.id, v.act.invis > 0 ? 1 : 0, Math.ceil(v.shieldT > 0 ? v.shieldT : 0)], pl, bd, tk, sab: sab || null, vr: Math.round(vrr), ar: arrows, loc,
         cd: v.role === 'imp' ? [Math.max(0, Math.ceil(v.killCd)), Math.max(0, Math.ceil(this.sabCd))] : null, ab: { cd: r0(v.cd), act: r0(v.act), us: v.uses, sup: v.supLeft },
         probe: v.probe ? [v.probe.id, v.probe.t / this.settings.men_inv] : null, cams, vd, co: camOn ? 1 : 0, intro: this.intro > 0 ? Math.ceil(this.intro) : 0 });
     }
@@ -230,7 +232,7 @@ export class Room {
   housekeeping(now) {
     for (const p of this.list) {
       if (p.ws || !p.dcAt || p.gone || now - p.dcAt < DC_GRACE * 1000) continue;
-      p.gone = true; p.alive = false;
+      p.gone = true; p.alive = false; console.log(`[saiu] ${this.code} ${p.name} ficou offline por mais de ${DC_GRACE}s e foi removido da partida`);
     }
     if (this.phase !== 'lobby' && this.phase !== 'end') {
       if (this.checkWin()) return;
@@ -247,7 +249,8 @@ export class Room {
       case 'set': this.setSetting(p, m.k, m.v); break;
       case 'botnames': if (p.id === this.hostId && ph === 'lobby') { this.botText = String(m.text || '').slice(0, 600); this.syncBots(true); this.lobby(); } break;
       case 'start': this.start(p); break;
-      case 'input': if (ph === 'play') { p.ix = Math.max(-1, Math.min(1, +m.x || 0)); p.iy = Math.max(-1, Math.min(1, +m.y || 0)); } break;
+      case 'ping': this.send(p, { t: 'pong', ts: m.ts }); break;
+      case 'input': if (ph === 'play') { p.inAt = Date.now(); p.ix = Math.max(-1, Math.min(1, +m.x || 0)); p.iy = Math.max(-1, Math.min(1, +m.y || 0)); } break;
       case 'taskStart': { if (ph !== 'play') break; const k = p.tasks.find(t => t.id === m.id && !t.done), s = stationById[m.id];
         if (k && s && dist(p, s) <= TASK_R) p.ts[m.id] = Date.now(); break; }
       case 'taskDone': { if (ph !== 'play') break; const k = p.tasks.find(t => t.id === m.id && !t.done), s = stationById[m.id], t0 = p.ts[m.id];
@@ -256,7 +259,7 @@ export class Room {
       case 'kill': this.kill(p); break;
       case 'ab': this.ab(p, m); break;
       case 'report': if (ph === 'play' && live && p.vent < 0) { const b = this.bodies.find(b => dist(p, b) <= REPORT_R); if (b) this.meeting(p, 'body', b.id); } break;
-      case 'emergency': if (ph === 'play' && live && p.vent < 0 && dist(p, SPECIAL.emergency) <= FIX_R + 40 && p.emerg < this.settings.emergencies && this.sab?.k !== 'heat') { p.emerg++; this.meeting(p, 'emergency'); } break;
+      case 'emergency': if (ph === 'play' && live && p.vent < 0 && dist(p, SPECIAL.emergency) <= FIX_R + 40 && p.emerg < this.settings.emergencies && this.sab?.k !== 'heat') { if (this.emergCd > 0) { this.send(p, { t: 'err', msg: `O botão de emergência está recarregando (${Math.ceil(this.emergCd)}s).` }); break; } p.emerg++; this.meeting(p, 'emergency'); } break;
       case 'sabotage': if (ph === 'play' && live && p.team === 'imp' && !this.sab && this.sabCd <= 0 && ['lights', 'comms', 'heat'].includes(m.k)) {
         this.sab = { k: m.k, t: m.k === 'heat' ? HEAT_TIME : 0, fixed: m.k === 'heat' ? [false, false] : [false] };
         this.all({ t: 'sab', k: m.k }); } break;
@@ -283,6 +286,7 @@ export class Room {
     const vap = v.morph || v.id, kap = killer ? (killer.morph || killer.id) : null;
     v.alive = false; v.ix = v.iy = 0; v.moving = false; v.watch = false; v.vent = -1; v.track = null; v.probe = null; v.act = {}; v.morph = null;
     v.killedBy = killer?.id ?? null; v.deathRoom = roomAt(v.x, v.y)?.name || 'corredor';
+    console.log(`[morte] ${this.code} ${v.name} (${v.job}) por ${killer ? killer.name + ' (' + killer.job + ')' : 'voto/tiro'} em ${v.deathRoom}`);
     const vib = killer?.job === 'vibora';
     if (body) {
       this.bodies.push({ id: v.id, x: v.x, y: v.y, killer: killer?.id ?? null, arrow: v.job === 'barulhento', g: vib, vanish: vib ? this.settings.vib_van : 0 });
@@ -407,7 +411,7 @@ export class Room {
     const bd = bodyId != null ? this.bodies.find(b => b.id === bodyId) : null;
     for (const p of this.list) { p.vote = null; p.voted = false; p.ix = p.iy = 0; p.vent = -1; p.morph = null; p.act = {}; p.track = null; p.probe = null; p.watch = false; }
     Object.assign(this, { phase: 'meet', timer: this.settings.discuss, sab: null, bodies: [], supreme: null, meet: { by: by.id, reason, body: bodyId } });
-    this.all({ t: 'meeting', by: by.id, reason, body: bodyId, bpos: bd ? [bd.x | 0, bd.y | 0] : null, time: this.settings.discuss, alive: this.alive().map(p => p.id), dead: this.list.filter(p => !p.alive || p.gone).map(p => p.id) });
+    this.all({ t: 'meeting', by: by.id, reason, body: bodyId, bpos: bd ? [bd.x | 0, bd.y | 0] : null, time: this.settings.discuss, alive: this.alive().map(p => p.id), dead: this.list.filter(p => !p.alive || p.gone).map(p => p.id), off: this.list.filter(p => !p.bot && !p.ws && !p.gone).map(p => p.id), gone: this.list.filter(p => p.gone).map(p => p.id) });
     for (const p of this.list) if (p.supLeft > 0 && p.alive) this.send(p, { t: 'sup', left: p.supLeft });
   }
   nextPhase() {
@@ -446,7 +450,7 @@ export class Room {
     }
     const ps = this.list.filter(p => !p.gone);
     ps.forEach((p, i) => { const a = (i / ps.length) * Math.PI * 2; p.x = SPECIAL.spawn.x + Math.cos(a) * 85; p.y = SPECIAL.spawn.y + Math.sin(a) * 60; p.killCd = Math.max(p.killCd, 12); if (p.cd.skill != null) p.cd.skill = Math.max(p.cd.skill, 12); });
-    Object.assign(this, { phase: 'play', meet: null, sabCd: 15, intro: 0 });
+    Object.assign(this, { phase: 'play', meet: null, sabCd: 15, emergCd: this.settings.emergCd, intro: 0 });
     this.all({ t: 'play' });
   }
 

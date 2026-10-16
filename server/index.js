@@ -24,12 +24,15 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4096 });
+// batimento: evita que proxies derrubem conexões ociosas (lobby/reunião) e remove conexões mortas
+setInterval(() => { for (const w of wss.clients) { if (w.isAlive === false) { w.terminate(); continue; } w.isAlive = false; try { w.ping(); } catch { } } }, 25000);
 wss.on('connection', ws => {
+  ws.isAlive = true; ws.on('pong', () => { ws.isAlive = true; });
   const c = { room: null, p: null, n: 0, t0: Date.now() };
   const err = msg => ws.send(JSON.stringify({ t: 'err', msg }));
   const bind = r => { if (!r.p) return err(r.err || 'Erro.'); c.room = r.room; c.p = r.p; };
   ws.on('message', raw => {
-    const now = Date.now(); if (now - c.t0 > 1000) { c.t0 = now; c.n = 0; } if (++c.n > 120) return; // limite de mensagens/s
+    const now = Date.now(); if (now - c.t0 > 1000) { c.t0 = now; c.n = 0; } if (++c.n > 240) return; // limite de mensagens/s
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
     if (!c.p) {

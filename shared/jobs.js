@@ -35,7 +35,7 @@ export const JOBS = [
   j('virus', 'Vírus', 'neu', '#22A447', 'Infecta todos os jogadores e então explode: todos morrem e ele vence.', 40, 1),
   j('phantom', 'Phantom', 'neu', '#FFFFFF', 'Fantasma: conclui as próprias tarefas para vencer sozinho. Fica visível 10 s a cada 20 s; se clicarem nele, perde a profissão.', 100, 1, true),
   j('redjohn', 'Red John', 'imp', '#FF0000', 'Impostor: deixa um rosto vermelho chorando nas vítimas, investiga profissões e amplia o mapa.', 40, 1),
-  j('samurai', 'Samurai', 'imp', '#FF0000', 'Impostor: elimina mais rápido, corre um pouco mais e tem armadura que bloqueia 1 morte por rodada.', 40, 1),
+  j('samurai', 'Samurai', 'imp', '#FF0000', 'Impostor: elimina mais rápido; depois de matar corre e fica invisível por alguns segundos; tem armadura que bloqueia 1 morte por rodada.', 40, 1),
   j('dexter', 'Dexter', 'imp', '#233D72', 'Impostor: guarda corpos em sacos, carrega e os esconde por alguns segundos.', 40, 1),
 ];
 export const JOB = Object.fromEntries(JOBS.map(x => [x.id, x]));
@@ -54,16 +54,16 @@ const PARAMS_RAW = [
   P('esp_dur', 'Espectro: duração da invisibilidade (s)', 3, 30, 1, 10, 'Espectro'), P('esp_cd', 'Espectro: recarga (s)', 5, 90, 5, 25, 'Espectro'),
   P('rj_cd', 'Red John: recarga da investigação (s)', 5, 90, 1, 25, 'Red John'), P('rj_uses', 'Red John: investigações por rodada', 1, 6, 1, 2, 'Red John'),
   P('zoom_dur', 'Zoom (Red John/Policial): duração (s)', 3, 30, 1, 8, 'Policial'), P('zoom_cd', 'Zoom (Red John/Policial): recarga (s)', 5, 90, 1, 30, 'Policial'), P('pol_cd', 'Policial: recarga do tiro (s)', 10, 90, 1, 30, 'Policial'),
-  P('sam_speed', 'Samurai: bônus de velocidade (x)', 1, 1.6, 0.05, 1.15, 'Samurai'), P('sam_killcd', 'Samurai: tempo entre eliminações (s)', 3, 30, 1, 10, 'Samurai'), P('sam_armor', 'Samurai: bloqueios de armadura por rodada (0 = sem armadura)', 0, 3, 1, 1, 'Samurai'),
+  P('sam_speed', 'Samurai: velocidade após matar (x)', 1, 2, 0.05, 1.4, 'Samurai'), P('sam_dur', 'Samurai: duração da velocidade + invisibilidade após matar (s)', 2, 20, 1, 5, 'Samurai'), P('sam_killcd', 'Samurai: tempo entre eliminações (s)', 3, 30, 1, 10, 'Samurai'), P('sam_armor', 'Samurai: bloqueios de armadura por rodada (0 = sem armadura)', 0, 3, 1, 1, 'Samurai'),
   P('dex_hide', 'Dexter: saco invisível por (s)', 5, 60, 1, 15, 'Dexter'), P('dex_carry', 'Dexter: tempo máximo carregando (s)', 5, 90, 1, 30, 'Dexter'), P('dex_cd', 'Dexter: recarga ao ensacar (s)', 5, 90, 1, 20, 'Dexter'),
   P('hak_cd', 'Hacker: recarga do conserto remoto (s)', 10, 180, 5, 45, 'Hacker'),
   P('gh_dur', 'Ghost Inc: duração (s)', 2, 15, 1, 5, 'Ghost Inc'), P('gh_cd', 'Ghost Inc: recarga (s)', 5, 120, 5, 30, 'Ghost Inc'),
   P('tl_rew', 'Time Lord: retrocesso (s)', 10, 15, 1, 12, 'Time Lord'), P('tl_cd', 'Time Lord: recarga (s)', 20, 180, 5, 90, 'Time Lord'), P('tl_uses', 'Time Lord: usos por partida', 1, 5, 1, 2, 'Time Lord'),
   P('law_max', 'Advogado: máximo de votos acumulados', 1, 5, 1, 3, 'Advogado'),
-  P('frz_n', 'Congelador: áreas por rodada', 1, 5, 1, 3, 'Congelador'), P('frz_win', 'Congelador: áreas congeladas para vencer', 1, 8, 1, 5, 'Congelador'),
+  P('frz_n', 'Congelador: áreas por rodada', 1, 5, 1, 3, 'Congelador'), P('frz_cd', 'Congelador: recarga a cada área (s)', 10, 300, 5, 60, 'Congelador'), P('frz_win', 'Congelador: áreas congeladas para vencer', 1, 8, 1, 5, 'Congelador'),
   P('pa_cd', 'Parinomo: recarga do abastecimento (s)', 3, 60, 1, 10, 'Parinomo'), P('pa_resp', 'Parinomo: isqueiro reaparece a cada (s)', 15, 120, 5, 45, 'Parinomo'),
   P('vir_cd', 'Vírus: recarga da infecção (s)', 3, 60, 1, 10, 'Vírus'),
-  P('ph_hid', 'Phantom: tempo oculto (s)', 5, 60, 1, 20, 'Phantom'), P('ph_vis', 'Phantom: tempo visível (s)', 3, 30, 1, 10, 'Phantom'),
+  P('ph_tasks', 'Phantom: tarefas para vencer', 1, 20, 1, 12, 'Phantom'), P('ph_hid', 'Phantom: tempo oculto (s)', 5, 60, 1, 20, 'Phantom'), P('ph_vis', 'Phantom: tempo visível (s)', 3, 30, 1, 10, 'Phantom'),
 ];
 export const PARAMS = PARAMS_RAW.filter((p, i, a) => a.findIndex(q => q.k === p.k) === i); // chaves únicas
 export const DEFAULT_SETTINGS = { neutrals: 1 };

@@ -200,9 +200,9 @@ export class Room {
     if (!p.bot && p.inAt && Date.now() - p.inAt > 700) p.ix = p.iy = 0; // sem notícias do cliente: para (evita boneco andando sozinho)
     const l = Math.hypot(p.ix, p.iy); p.moving = l > 0.05;
     if (!p.moving) return;
-    const k = Math.min(1, 1 / l) * BASE_SPEED * this.settings.speed * (p.job === 'samurai' && p.alive ? this.settings.sam_speed : 1) * dt, dx = p.ix * k, dy = p.iy * k;
+    const k = Math.min(1, 1 / l) * BASE_SPEED * this.settings.speed * (p.act.samrush > 0 ? this.settings.sam_speed : 1) * dt, dx = p.ix * k, dy = p.iy * k;
     if (dx) p.face = dx > 0 ? 1 : -1;
-    if (!p.alive) { p.x = Math.min(WORLD.w - 20, Math.max(20, p.x + dx)); p.y = Math.min(WORLD.h - 20, Math.max(20, p.y + dy)); return; }
+    if (!p.alive && !(p.ghostJob === 'phantom' && !p.phLost)) { p.x = Math.min(WORLD.w - 20, Math.max(20, p.x + dx)); p.y = Math.min(WORLD.h - 20, Math.max(20, p.y + dy)); return; }
     const ph = p.act.phase > 0, ok = (x, y) => !this.frozenHit(x, y) && (ph ? x > 20 && y > 20 && x < WORLD.w - 20 && y < WORLD.h - 20 : canStand(x, y));
     if (ok(p.x + dx, p.y)) p.x += dx;
     if (ok(p.x, p.y + dy)) p.y += dy;
@@ -216,7 +216,7 @@ export class Room {
   }
   eligible(except) { return this.list.filter(q => q !== except && q.alive && !q.gone); }
   bodyHidden(b) { return b.hideT > 0; }
-  drop(p) { const b = this.bodies.find(q => q.id === p.carry); if (b) { b.carry = null; b.x = p.x; b.y = p.y; } p.carry = null; }
+  drop(p) { const b = this.bodies.find(q => q.id === p.carry); if (b) { b.carry = null; b.x = p.x; b.y = p.y; b.hideT = 0; /* no chão o saco fica visível na hora */ } p.carry = null; }
   histTick() {
     if (this.n % 15 !== 0) return; // ~2 amostras por segundo
     this.hist.push({ t: this.clockT, pl: this.list.filter(q => !q.gone).map(q => [q.id, q.x, q.y, q.alive ? 1 : 0, q.vent]) });
@@ -241,6 +241,11 @@ export class Room {
     for (const id of rev) this.send(this.players.get(id), { t: 'revive' });
     console.log(`[retrocesso] ${this.code} ${p.name} voltou ${Math.round(this.clockT - e.t)}s; ressuscitados: ${rev.length}`);
   }
+  givePhantomTasks(v) { // o Phantom ganha tarefas próprias (não contam para a vitória dos inocentes) e vence ao concluir todas
+    v.tasks = shuffle([...STATIONS]).slice(0, this.settings.ph_tasks).map(s => ({ id: s.id, type: s.type, name: s.name, room: s.room, done: false })); v.ts = {};
+    this.send(v, { t: 'tasks', list: v.tasks });
+  }
+  phantomDone(p) { return p.ghostJob === 'phantom' && !p.phLost && p.tasks.length > 0 && p.tasks.filter(k => !this.taskFrozen(k)).every(k => k.done); }
   phVisible(p) { const S = this.settings, cyc = S.ph_hid + S.ph_vis; return p.ghostJob === 'phantom' && !p.alive && !p.phLost && (p.phT % cyc) >= S.ph_hid; }
   paProgress(pa) { const el = this.eligible(pa); return [el.filter(q => q.fuel).length, el.length]; }
   viProgress(vi) { const el = this.eligible(vi); return [el.filter(q => q.inf).length, el.length]; }
@@ -262,7 +267,7 @@ export class Room {
   }
   taskCount() {
     let d = 0, t = 0;
-    for (const p of this.list) if (p.team === 'inn' && !p.gone) for (const k of p.tasks) { if (this.taskFrozen(k)) continue; t++; if (k.done) d++; }
+    for (const p of this.list) if (p.team === 'inn' && !p.gone && p.ghostJob !== 'phantom') for (const k of p.tasks) { if (this.taskFrozen(k)) continue; t++; if (k.done) d++; }
     return [d, t];
   }
   snapshot() {
@@ -277,16 +282,16 @@ export class Room {
       for (const p of this.list) {
         if (p === v || p.gone || p.vent >= 0) continue;
         const phv = this.phVisible(p); if (!p.alive && v.alive && !phv) continue;
-        const inv = p.act.invis > 0; if (inv && v.alive && v.team !== 'imp') continue;
-        if (v.alive && dist(v, p) > R) continue;
+        const inv = p.act.invis > 0 || p.act.samrush > 0; if (inv && v.alive && v.team !== 'imp') continue; // Espectro e Samurai em disparada ficam invisíveis
+        if (v.alive && !(v.act.zoom > 0) && dist(v, p) > R) continue; // com ZOOM (Policial/Red John) vê todos os jogadores andando
         pl.push([p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.alive ? 0 : phv && v.alive ? 2 : 1, p.morph || p.id, inv ? 1 : 0]);
       }
-      for (const b of this.bodies) if ((!v.alive || dist(v, b) <= R) && (!this.bodyHidden(b) || !v.alive)) bd.push([b.id, b.x | 0, b.y | 0, b.g ? 1 : 0, b.fx || 0, b.bag ? (this.bodyHidden(b) ? 2 : 1) : 0]);
+      for (const b of this.bodies) if ((!v.alive || v.act.zoom > 0 || dist(v, b) <= R) && (!this.bodyHidden(b) || !v.alive)) bd.push([b.id, b.x | 0, b.y | 0, b.g ? 1 : 0, b.fx || 0, b.bag ? (this.bodyHidden(b) ? 2 : 1) : 0]);
       let cams = null, vd = null;
-      if (v.watch) cams = CAMS.map(c => { const o = { x: c.vx, y: c.vy }; return [this.list.filter(p => p.alive && !p.gone && p.vent < 0 && !(p.act.invis > 0) && dist(p, o) <= CAM_R).map(p => [p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.morph || p.id]), this.bodies.filter(b => dist(b, o) <= CAM_R && !this.bodyHidden(b)).map(b => [b.id, b.x | 0, b.y | 0, b.g ? 1 : 0])]; });
+      if (v.watch) cams = CAMS.map(c => { const o = { x: c.vx, y: c.vy }; return [this.list.filter(p => p.alive && !p.gone && p.vent < 0 && !(p.act.invis > 0) && !(p.act.samrush > 0) && dist(p, o) <= CAM_R).map(p => [p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.morph || p.id]), this.bodies.filter(b => dist(b, o) <= CAM_R && !this.bodyHidden(b)).map(b => [b.id, b.x | 0, b.y | 0, b.g ? 1 : 0])]; });
       if (v.vent >= 0 && v.alive) vd = this.list.filter(p => p !== v && p.alive && !p.gone && dist(p, v) <= 1600).map(p => +Math.atan2(p.y - v.y, p.x - v.x).toFixed(2));
       const tr = v.track && this.players.get(v.track); const loc = tr && tr.alive && v.act.locate > 0 ? [tr.x | 0, tr.y | 0, tr.id] : null;
-      this.send(v, { t: 'snap', ec: Math.ceil(Math.max(0, this.emergCd || 0)), you: [v.x | 0, v.y | 0, v.vent, v.morph || v.id, v.act.invis > 0 ? 1 : 0, Math.ceil(v.shieldT > 0 ? v.shieldT : 0)], pl, bd, tk, sab: sab || null, vr: Math.round(vrr), ar: arrows, loc,
+      this.send(v, { t: 'snap', ec: Math.ceil(Math.max(0, this.emergCd || 0)), you: [v.x | 0, v.y | 0, v.vent, v.morph || v.id, v.act.invis > 0 || v.act.samrush > 0 ? 1 : 0, Math.ceil(v.shieldT > 0 ? v.shieldT : 0)], pl, bd, tk, sab: sab || null, vr: Math.round(vrr), ar: arrows, loc,
         cd: v.role === 'imp' ? [Math.max(0, Math.ceil(v.killCd)), Math.max(0, Math.ceil(this.sabCd))] : null, ab: { cd: r0(v.cd), act: r0(v.act), us: v.uses, sup: v.supLeft },
         probe: v.probe ? [v.probe.id, v.probe.t / this.settings.men_inv] : null, fz: this.frozen.size ? [...this.frozen] : 0, xt: this.extra(v, R), cams, vd, co: camOn ? 1 : 0, intro: this.intro > 0 ? Math.ceil(this.intro) : 0 });
     }
@@ -353,7 +358,7 @@ export class Room {
   }
   taskFrozen(k) { const s = stationById[k.id]; return !!s && [...this.frozen].some(id => ROOM_BY[id].name === s.room); }
   taskHooks(p) {
-    if (p.ghostJob === 'phantom' && !p.phLost && p.tasks.length && p.tasks.every(k => k.done)) return this.end('phantom', `${p.name} (Phantom) concluiu todas as tarefas e venceu sozinho!`, p.id);
+    if (this.phantomDone(p)) return this.end('phantom', `${p.name} (Phantom) concluiu todas as tarefas e venceu sozinho!`, p.id);
     if (!p.supGiven && (p.job === 'juiz' || p.job === 'mentalista')) { p.supGiven = true; p.supLeft = this.settings.jui_uses; this.send(p, { t: 'sup', left: p.supLeft, fresh: true }); }
     if (p.job === 'mentalista' && !p.revealed && p.tasks.every(k => k.done)) { p.revealed = true; this.send(p, { t: 'unlock' }); }
   }
@@ -379,7 +384,7 @@ export class Room {
     // profissões de fantasma (só inocentes que morrem)
     if (v.team === 'inn') for (const gj of shuffle([...GHOST_JOBS])) {
       if ((this.ghostN[gj] || 0) < this.settings['m_' + gj] && Math.random() * 100 < this.settings['w_' + gj]) {
-        this.ghostN[gj] = (this.ghostN[gj] || 0) + 1; v.ghostJob = gj; v.cd = {}; v.uses.inf = this.settings.inf_uses; v.phT = 0; v.phLost = false; this.send(v, { t: 'ghost', job: gj }); if (gj === 'phantom') this.taskHooks(v); break;
+        this.ghostN[gj] = (this.ghostN[gj] || 0) + 1; v.ghostJob = gj; v.cd = {}; v.uses.inf = this.settings.inf_uses; v.phT = 0; v.phLost = false; this.send(v, { t: 'ghost', job: gj }); if (gj === 'phantom') this.givePhantomTasks(v); break;
       }
     }
     return true;
@@ -394,6 +399,7 @@ export class Room {
     const v = this.nearestVictim(p, q => q.team !== 'imp'); if (!v) return;
     p.killCd = p.job === 'samurai' ? this.settings.sam_killcd : this.settings.killCd;
     if (!this.slay(v, p)) return;
+    if (p.job === 'samurai') p.act.samrush = this.settings.sam_dur; // velocidade + invisibilidade após matar
     p.x = v.x; p.y = v.y; this.checkWin();
   }
   fix(p, id) {
@@ -504,9 +510,10 @@ export class Room {
       case 'freeze': {
         if (J !== 'congelador' || !play || !p.alive) return; const id = String(m.room || '');
         if (!FREEZABLE.has(id) || this.frozen.has(id)) return bad('Essa área não pode ser congelada.');
-        const i = p.frzSel.indexOf(id); if (i >= 0) { p.frzSel.splice(i, 1); return bad('Seleção removida.'); }
+        const i = p.frzSel.indexOf(id); if (i >= 0) { p.frzSel.splice(i, 1); p.cd.freeze = 0; return bad('Seleção removida.'); }
+        if (p.cd.freeze > 0) return bad(`Aguarde ${Math.ceil(p.cd.freeze)}s para congelar outra área.`);
         if (p.frzSel.length >= S.frz_n) return bad(`Máximo de ${S.frz_n} áreas por rodada.`);
-        p.frzSel.push(id); this.send(p, { t: 'hint', text: `${ROOM_BY[id].name} selecionada. O congelamento acontece após a votação.` }); break;
+        p.frzSel.push(id); p.cd.freeze = S.frz_cd; this.send(p, { t: 'hint', text: `${ROOM_BY[id].name} selecionada. O congelamento acontece após a votação.` }); break;
       }
       case 'fuel': {
         if (J !== 'parinomo' || !play || !p.alive || p.vent >= 0 || p.cd.fuel > 0) return;
@@ -535,7 +542,7 @@ export class Room {
       case 'phclick': {
         if (!play || !p.alive) return; const ph2 = this.players.get(+m.to);
         if (!ph2 || !this.phVisible(ph2) || Math.hypot(p.x - ph2.x, p.y - ph2.y) > PH_R) return;
-        ph2.phLost = true; ph2.ghostJob = null; this.ghostN.phantom = Math.max(0, (this.ghostN.phantom || 1) - 1);
+        ph2.phLost = true; ph2.ghostJob = null; ph2.tasks = []; this.send(ph2, { t: 'tasks', list: [] }); this.ghostN.phantom = Math.max(0, (this.ghostN.phantom || 1) - 1);
         this.send(ph2, { t: 'phlost' }); this.send(p, { t: 'hint', text: 'Você descobriu o Phantom! Ele perdeu a profissão.' }); break;
       }
       case 'bag': {
@@ -611,6 +618,7 @@ export class Room {
   applyFreeze() { // o congelamento só vale depois da votação; todos já reaparecem no centro
     const cg = this.list.filter(p => p.job === 'congelador' && p.alive && !p.gone && p.frzSel.length);
     for (const p of cg) { for (const id of p.frzSel) this.frozen.add(id); const n = p.frzSel.length; p.frzSel = []; this.send(p, { t: 'hint', text: `${n} área(s) congelada(s). Total: ${this.frozen.size}/${this.settings.frz_win}.` }); }
+    for (const q of this.list) if (this.phantomDone(q)) { this.end('phantom', `${q.name} (Phantom) concluiu todas as tarefas e venceu sozinho!`, q.id); return; }
     if (cg.length) { this.all({ t: 'frozen', list: [...this.frozen] }); if (this.frozen.size >= this.settings.frz_win) { const p = cg[0]; this.end('congelador', `${p.name} (Congelador) congelou a estação inteira!`, p.id); } }
   }
   // ---------- fim ----------

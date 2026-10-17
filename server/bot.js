@@ -60,6 +60,7 @@ export class Bot {
       case 'sup': this.supLeft = m.left; break;
       case 'infmsg': this.onInf(m.text); break;
       case 'camOff': this.watching = false; break;
+      case 'tasks': this.tasks = m.list.map(t => ({ ...t })); break;
       case 'bank': this.bank = m.n; break;
       case 'rewind': this.path = null; this.goal = null; this.pause = 0.6; break;
       case 'phlost': this.ghostJob = null; break;
@@ -484,7 +485,7 @@ export class Bot {
     if (b) { this.act({ t: 'ab', a: 'rewind' }); this.lastRewindAt = this.clock; this.bodies.clear(); }
   }
   freezeTick(use) {
-    const sel = this.xt.sel || []; if (!this.p.alive || sel.length >= this.c('frz_n') || !roll(0.1 + use * 0.25)) return;
+    const sel = this.xt.sel || []; if (!this.p.alive || this.ab.cd.freeze > 0 || sel.length >= this.c('frz_n') || !roll(0.1 + use * 0.25)) return;
     const cand = FREEZABLE.filter(id => !this.fz.includes(id) && !sel.includes(id)); if (!cand.length) return;
     const score = id => { const r = ROOM_BY_ID[id]; let n = 0; for (const o of this.seen.values()) if (this.clock - o.t < 40 && o.x > r.x && o.x < r.x + r.w && o.y > r.y && o.y < r.y + r.h) n++; return n + Math.random() * 1.5; };
     cand.sort((a, c) => score(c) - score(a)); this.act({ t: 'ab', a: 'freeze', room: cand[0] });

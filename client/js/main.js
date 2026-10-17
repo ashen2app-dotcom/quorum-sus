@@ -231,8 +231,8 @@ function update(dt) {
   const key = ix + ',' + iy, nowT = performance.now(); inT -= dt; if (inT <= 0 || (key !== lastIn && ((!ix && !iy) || nowT - lastSendAt > 60))) { send({ t: 'input', x: ix, y: iy }); lastIn = key; lastSendAt = nowT; inT = 0.25; }
   const l = Math.hypot(ix, iy); me.moving = l > 0;
   if (l) {
-    const k = (190 * S.settings.speed * (S.job === 'samurai' && me.alive ? (S.settings.sam_speed || 1) : 1) * dt) / l, dx = ix * k, dy = iy * k; if (dx) me.face = dx > 0 ? 1 : -1;
-    if (!me.alive) { me.x = Math.max(20, Math.min(WORLD.w - 20, me.x + dx)); me.y = Math.max(20, Math.min(WORLD.h - 20, me.y + dy)); }
+    const k = (190 * S.settings.speed * (S.ab?.act?.samrush > 0 ? (S.settings.sam_speed || 1) : 1) * dt) / l, dx = ix * k, dy = iy * k; if (dx) me.face = dx > 0 ? 1 : -1;
+    if (!me.alive && !(S.ghostJob === 'phantom')) { me.x = Math.max(20, Math.min(WORLD.w - 20, me.x + dx)); me.y = Math.max(20, Math.min(WORLD.h - 20, me.y + dy)); }
     else { const ph = S.ab?.act?.phase > 0, ok = (x, y) => !frozenHit(x, y) && (ph ? x > 20 && y > 20 && x < WORLD.w - 20 && y < WORLD.h - 20 : canStand(x, y)); if (ok(me.x + dx, me.y)) me.x += dx; if (ok(me.x, me.y + dy)) me.y += dy; }
     if (me.alive && (footT -= dt) <= 0) { sfx('step'); footT = 0.3; }
   }
@@ -270,7 +270,7 @@ function updAbil(me) {
     if (id === 'zoom' && act > 0) { dis = false; txt = act + 's'; }
     if (id === 'phase') { dis = cd > 0 || act > 0; if (act > 0) txt = act + 's'; }
     if (id === 'rewind') { dis = cd > 0 || !(ab.us.tl > 0); if (!cd) txt = 'x' + (ab.us.tl | 0); }
-    if (id === 'freeze') { dis = false; txt = (S.xt.sel || []).length + '/' + S.settings.frz_n; }
+    if (id === 'freeze') { dis = cd > 0; if (!cd) txt = (S.xt.sel || []).length + '/' + S.settings.frz_n; }
     if (id === 'fuel') { dis = cd > 0 || !tg || !!(S.xt.pf && S.xt.pf[0] >= S.xt.pf[1]); if (!cd) txt = (S.xt.pf?.[0] ?? 0) + '/' + (S.xt.pf?.[1] ?? 0); }
     if (id === 'ignite') { dis = !S.xt.hl; txt = S.xt.hl ? '!' : '—'; }
     if (id === 'infect') { dis = cd > 0 || !tg || !!(S.xt.vi && S.xt.vi[0] >= S.xt.vi[1]); if (!cd) txt = (S.xt.vi?.[0] ?? 0) + '/' + (S.xt.vi?.[1] ?? 0); }
@@ -376,6 +376,7 @@ net.on('pong', m => { const r = performance.now() - m.ts; S.rtt = S.rtt ? S.rtt 
 net.on('hint', m => UI.toast(m.text, 7000));
 net.on('bank', m => { S.bank = m.n; if (m.saved) { S.voted = true; UI.lockVote(); UI.toast('Voto guardado para as próximas reuniões!'); sfx('ok'); } if (S.phase === 'meet' || S.phase === 'vote') buildMeetAb(); });
 net.on('frozen', m => { S.fz = m.list; hudTasks(); UI.toast('❄ Áreas congeladas: ' + m.list.map(i => ROOM_BY_ID[i].name).join(', '), 7000); sfx('blackout'); });
+net.on('tasks', m => { S.myTasks = m.list.map(t => ({ ...t })); hudTasks(); });
 net.on('phlost', () => { S.ghostJob = null; S._ej = null; buildAbil(); UI.toast('Você foi descoberto e perdeu a profissão de Phantom!', 6000); });
 net.on('revive', () => { S.me.alive = true; S.ghostJob = null; S._ej = null; buildAbil(); UI.toast('O tempo voltou: você está vivo de novo!', 5000); });
 net.on('rewind', m => { R.flash = 0.7; addShake(6); sfx('vent'); for (const [id, x, y] of m.ps) if (id === S.id) { S.me.x = x; S.me.y = y; R.cam.x = x; R.cam.y = y; } for (const id of m.rev) { S.deadKnown.delete(id); } S.bodies = S.bodies.filter(b => !m.rev.includes(b.id)); S.players.clear(); UI.toast(`⏪ ${S.roster.get(m.by)?.name || 'Alguém'} retrocedeu o tempo!`, 4500); });

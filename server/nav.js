@@ -29,8 +29,10 @@ class Heap {
 }
 const D8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
 // Retorna lista de pontos {x,y} do caminho (já suavizada) ou null se não houver caminho.
-export function findPath(x0, y0, x1, y1) {
-  const s = snap(x0, y0), g = snap(x1, y1); if (!s || !g) return null;
+// blk (opcional): retângulos congelados que devem ser tratados como paredes.
+export function findPath(x0, y0, x1, y1, blk) {
+  const inB = (i, j) => { if (!blk || !blk.length) return false; const x = i * C + C / 2, y = j * C + C / 2; for (const r of blk) if (x + 14 > r.x && x - 14 < r.x + r.w && y + 14 > r.y && y - 14 < r.y + r.h) return true; return false; };
+  const s = snap(x0, y0), g = snap(x1, y1); if (!s || !g) return null; if (inB(g[0], g[1])) return null;
   const si = s[1] * GW + s[0], gi = g[1] * GW + g[0], gs = new Float32Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), closed = new Uint8Array(N), h = new Heap();
   const hf = (i, j) => { const dx = Math.abs(i - g[0]), dy = Math.abs(j - g[1]); return Math.max(dx, dy) + 0.414 * Math.min(dx, dy); };
   gs[si] = 0; h.push(hf(s[0], s[1]), si); let found = false;
@@ -38,7 +40,7 @@ export function findPath(x0, y0, x1, y1) {
     const cur = h.pop(); if (closed[cur]) continue; closed[cur] = 1; if (cur === gi) { found = true; break; }
     const ci = cur % GW, cj = (cur / GW) | 0;
     for (const [dx, dy, w] of D8) {
-      const a = ci + dx, b = cj + dy; if (a < 0 || b < 0 || a >= GW || b >= GH) continue; const ni = b * GW + a; if (!OK[ni] || closed[ni]) continue;
+      const a = ci + dx, b = cj + dy; if (a < 0 || b < 0 || a >= GW || b >= GH) continue; const ni = b * GW + a; if (!OK[ni] || closed[ni] || inB(a, b)) continue;
       if (dx && dy && (!OK[cj * GW + a] || !OK[b * GW + ci])) continue; // sem cortar quina
       const ng = gs[cur] + w; if (ng < gs[ni]) { gs[ni] = ng; prev[ni] = cur; h.push(ng + hf(a, b), ni); }
     }

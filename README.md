@@ -1,4 +1,4 @@
-# Quórum — Estação Halcyon (v0.5 Beta)
+# Quórum — Estação Halcyon (v1.0)
 
 Jogo 2D multiplayer de dedução social (4–15 jogadores). Servidor autoritativo em Node.js + WebSocket; cliente em Canvas 2D (sem build, sem assets externos: arte vetorial e áudio sintetizados).
 
@@ -68,3 +68,14 @@ Limite conhecido: o resultado do minigame roda no cliente; o servidor garante pr
 
 ## Fase 2 (não incluída ainda)
 Loja de moedas/desbloqueios, XP/nível/perfil/estatísticas com salvamento no servidor (banco), skins/animações desbloqueáveis, mais tarefas e polimento de áudio/efeitos.
+
+
+## v1.0 — novidades
+**Profissões novas (12)** — nomes nas cores do documento; todas configuráveis no lobby (PROFISSÕES → Regras/aba da equipe):
+- Impostores: **Red John** (rosto vermelho chorando no corpo, INVESTIGAR profissão de quem está perto, ZOOM no mapa inteiro), **Samurai** (kill cooldown menor, velocidade maior, armadura passiva que bloqueia 1 morte por rodada; anel prateado + texto no HUD), **Dexter** (ENSACAR corpo, carregar, SOLTAR; saco invisível por 15 s).
+- Inocentes: **Policial** (tiro como o Xerife + ZOOM), **Hacker** (câmeras de qualquer lugar + conserta só a sabotagem de comunicação), **Ghost Inc** (atravessa paredes 5 s; nunca fica preso ao terminar), **Time Lord** (retrocede 10–15 s: posições voltam e mortos recentes ressuscitam), **Advogado** (GUARDAR VOTO na votação; gasta os acumulados com − / + ; persiste na partida).
+- Neutros: **Congelador** (seleciona até 3 áreas/rodada; só congelam após a votação; vence com N áreas), **Parinomo** (abastece todos → isqueiro aparece → INCENDIAR), **Vírus** (infecta todos → EXPLODIR), **Phantom** (fantasma; conclui as próprias tarefas; visível 10 s a cada 20 s; clique de um vivo tira a profissão).
+- Elegíveis (Parinomo/Vírus): jogadores vivos e conectados; mortos/desconectados saem da conta. Bots contam como jogadores.
+
+**Cosméticos:** +12 cores (24), +10 chapéus, +10 roupas, +10 acessórios, +10 mascotes, +10 skins — desenhados em `client/js/cosdraw.js`. **Cores únicas:** o servidor garante (humanos e bots); cores ocupadas aparecem riscadas; a partida não inicia com cor repetida.
+**Tarefas novas (6 tipos, 12 estações):** sequência (Simon), memória (pares), sliders, observação, bomba multi-etapas, deslizar cartão. **Bots:** comportamento por profissão em `server/bot.js` (usam só as informações que receberam). **Mobile:** botão ✕ no mapa grande; botão do Metamorfo/habilidades reorganizados e sem "clique fantasma" no seletor.

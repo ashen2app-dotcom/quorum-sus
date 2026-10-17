@@ -188,3 +188,26 @@ body.pc #lobby{align-items:center;gap:22px}body.pc .lobbyL{align-self:center}bod
 
 /* botões do HUD sempre acima da área do joystick */
 #hud{z-index:9}#joyZone{width:42%}
+
+/* v1.0: fechar mapa grande */
+#bigX{position:fixed;z-index:12;top:calc(10px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));width:48px;height:48px;border-radius:50%;border:2px solid var(--line);background:var(--pan);color:var(--txt);font-size:22px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+#bigmap{max-height:92vh;width:min(880px,92vw,calc(92vh*1.725))}
+/* v1.0: botões de ação no celular (Metamorfo/Espectro e outros com até 8 botões) */
+body.touch #acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,62px));direction:rtl;justify-content:end;align-items:end;max-width:min(62vw,330px);gap:6px}
+body.touch #acts>*{direction:ltr}body.touch #abil{display:contents}
+body.touch #acts button{width:100%;aspect-ratio:1;height:auto;min-width:0;padding:2px;overflow:hidden;line-height:1.05;text-align:center;word-break:keep-all;touch-action:manipulation}
+body.touch #acts button.long{font-size:7px;letter-spacing:-.2px}
+body.touch #acts button.main{grid-column:span 2;width:100%;max-width:92px;justify-self:end}
+@media (max-height:380px){body.touch #acts{grid-template-columns:repeat(auto-fit,minmax(48px,52px))}body.touch #acts button.main{max-width:76px}}
+
+.sw i.busy{opacity:.28;position:relative;cursor:not-allowed}.sw i.busy::after{content:'✕';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-style:normal;text-shadow:0 0 3px #000}
+.sw{flex-wrap:wrap}
+
+/* v1.0: novas tarefas */
+.pads{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:min(280px,70vw);margin:8px auto}.pads button{aspect-ratio:1.4;border-radius:16px;border:3px solid rgba(255,255,255,.15);background:color-mix(in srgb,var(--c) 45%,#10182e);cursor:pointer;touch-action:manipulation}.pads button.lit{background:var(--c);box-shadow:0 0 24px var(--c);transform:scale(1.04)}
+.mem{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:min(300px,76vw);margin:8px auto}.mem button{aspect-ratio:1;border-radius:12px;border:2px solid var(--line);background:#1a2340;color:#fff;font-size:26px;font-weight:800;cursor:pointer;touch-action:manipulation}.mem button.on{background:#2b3a66}.mem button.ok{background:#1f6b45;border-color:#6bd968}
+.slid{display:flex;flex-direction:column;gap:18px;width:min(300px,76vw);margin:10px auto}.srow{position:relative;padding:12px 0}.srow input{width:100%;height:30px}.srow .mk{position:absolute;top:6px;width:4px;height:36px;margin-left:-2px;background:#6bd968;border-radius:2px;pointer-events:none}.srow.good .mk{box-shadow:0 0 10px #6bd968}
+.spotg{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;width:min(300px,76vw);margin:8px auto}.spotg button{aspect-ratio:1;border-radius:10px;border:2px solid var(--line);background:#1a2340;color:#fff;font-size:24px;font-weight:700;cursor:pointer;touch-action:manipulation}
+.pgauge{position:relative;width:60px;height:170px;margin:8px auto;border:3px solid var(--line);border-radius:12px;background:#0b1226;overflow:hidden}.pzone{position:absolute;left:0;right:0;background:rgba(107,217,104,.35);border-top:2px solid #6bd968;border-bottom:2px solid #6bd968}.pfill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(#ff7ac8,#ff4f6d)}
+.swp{position:relative;width:min(320px,78vw);height:70px;margin:12px auto;background:#10182e;border:2px solid var(--line);border-radius:14px;touch-action:none}.swp .track{position:absolute;left:10px;right:10px;top:50%;height:4px;margin-top:-2px;background:#2a3556;border-radius:2px}.card2s{position:absolute;top:8px;width:74px;height:50px;border-radius:8px;background:#e0e0ff;color:#2a3556;font-size:28px;display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;user-select:none}
+#hList li.fz{opacity:.4;text-decoration:line-through}

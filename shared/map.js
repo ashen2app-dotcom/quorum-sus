@@ -46,6 +46,18 @@ export const STATIONS = [
   S('ext1', 'calibrate', 'Alinhar antena', 'Área Externa', 3000, 820),
   S('arq1', 'code', 'Abrir o cofre', 'Arquivo Secreto', 1010, 290),
   S('cab1', 'fuel', 'Drenar tanque', 'Cabine de Manutenção', 2000, 1680),
+  S('cen1', 'swipe', 'Passar o cartão de acesso', 'Sala Central', 1330, 860),
+  S('cen2', 'spot', 'Inspecionar o painel central', 'Sala Central', 1670, 860),
+  S('lab3', 'memory', 'Combinar amostras', 'Laboratório', 510, 420),
+  S('enf3', 'sliders', 'Ajustar o soro', 'Enfermaria', 480, 900),
+  S('eng3', 'pump', 'Pressurizar o reator', 'Engenharia', 520, 1500),
+  S('ger2', 'simon', 'Sequência dos disjuntores', 'Geradores', 1030, 1540),
+  S('arm3', 'spot', 'Conferir o inventário', 'Armazém', 1500, 1600),
+  S('com3', 'simon', 'Sincronizar a frequência', 'Comunicações', 2450, 1460),
+  S('ctl3', 'memory', 'Verificar rotas de navegação', 'Sala de Controle', 2500, 900),
+  S('seg3', 'sliders', 'Calibrar sensores de movimento', 'Segurança', 2400, 430),
+  S('ref3', 'pump', 'Encher a caldeira', 'Refeitório', 1500, 420),
+  S('ext2', 'swipe', 'Validar o crachá externo', 'Área Externa', 3050, 950),
 ];
 export const VENTS = [
   { x: 300, y: 580, g: 'a' }, { x: 330, y: 1090, g: 'a' }, { x: 300, y: 1660, g: 'a' },
@@ -74,4 +86,7 @@ export const CAMS = [
   { name: 'Corredor Leste', x: 2000, y: 892, vx: 2000, vy: 930 },
   { name: 'Armazém', x: 1500, y: 1392, vx: 1500, vy: 1560 },
 ];
-export const TASK_MIN = { wires: 2000, code: 2200, calibrate: 1500, fuel: 3200, reboot: 2000, order: 2200 }; // tempo mínimo (ms) por tipo de tarefa
+export const TASK_MIN = { wires: 2000, code: 2200, calibrate: 1500, fuel: 3200, reboot: 2000, order: 2200, simon: 3500, memory: 3500, sliders: 2500, spot: 2500, pump: 4000, swipe: 2000 }; // tempo mínimo (ms) por tipo de tarefa
+// v1.0: áreas que o Congelador pode congelar (fora as salas essenciais: reunião, spawn e pontos de conserto de sabotagem)
+export const FREEZABLE = ['refeitorio', 'lab', 'enfermaria', 'armazem', 'seguranca', 'externa', 'arquivo', 'cabine'];
+export const ROOM_BY_ID = Object.fromEntries(ROOMS.map(r => [r.id, r]));

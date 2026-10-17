@@ -1,7 +1,7 @@
 // Bot inteligente. Recebe EXATAMENTE as mesmas mensagens que um cliente humano (snapshots limitados pela visão,
 // avisos, chat…) e age pelas mesmas mensagens (input, kill, vote, ab…), então as regras/recargas são as do jogador.
 // Nunca lê o estado de outros jogadores no servidor: tudo o que "sabe" vem de percepção, habilidades ou chat.
-import { STATIONS, SPECIAL, VENTS, ROOMS, TASK_MIN, roomAt } from '../shared/map.js';
+import { STATIONS, SPECIAL, VENTS, ROOMS, TASK_MIN, FREEZABLE, ROOM_BY_ID, roomAt } from '../shared/map.js';
 import { JOB, JOBS, colorTone } from '../shared/jobs.js';
 import { findPath } from './nav.js';
 
@@ -10,7 +10,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const roll = p => Math.random() < p;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const KILL_R = 95, REPORT_R = 150;
+const KILL_R = 95, REPORT_R = 150, PH_R = 230;
 const STN = Object.fromEntries(STATIONS.map(s => [s.id, s]));
 const roomName = (x, y) => roomAt(x, y)?.name || 'um corredor';
 const CENTERS = ROOMS.filter(r => !r.hidden).map(r => ({ x: r.x + r.w / 2, y: r.y + r.h / 2, name: r.name }));
@@ -26,6 +26,7 @@ export class Bot {
       ab: { cd: {}, act: {}, us: {}, sup: 0 }, sab: null, cdKill: 99, sabCd: 99, vr: 420, tk: [0, 1], loc: null, goal: null, path: null, pi: 0, repath: 0, pause: 0, work: null, lastIn: '', stuckT: 0, stuckP: { x: p.x, y: p.y },
       phase: 'play', mtg: null, mtgAlive: new Set(), chatQ: [], voted: false, voteAt: 0, supLeft: 0, jp: false, lastKillAt: -99, meetEnd: 0, abT: 0, danger: null, ventUntil: 0, watching: false, watchUntil: 0,
       lastRoom: '', ended: false, nextPanel: 40, camLed: 0, accusedBy: new Set(), pendKill: null, panelDone: false, deathBy: null, killerJob: null, mtgStart: 0, lastGoalPick: 0, gameT0: 0, usedEmerg: 0, ghostT: 0, comp: new Map(), replies: 0, lastReplyAt: -99, said: new Set(), claims: new Map(), heatBy: new Map(), pushes: new Map(), roomClaim: new Map(), jokerSus: new Map(), execSus: new Map(), liars: new Set(), trusted: new Set(), lastSend: -99 });
+    Object.assign(this, { xt: {}, fz: [], bank: 0, lastRewindAt: -99 });
     this.trait = { chatty: rnd(0.7, 1.3), brave: rnd(0.6, 1.4), curious: rnd(0.6, 1.4) };
   }
   c(k) { return this.room.settings[k]; }
@@ -59,6 +60,10 @@ export class Bot {
       case 'sup': this.supLeft = m.left; break;
       case 'infmsg': this.onInf(m.text); break;
       case 'camOff': this.watching = false; break;
+      case 'bank': this.bank = m.n; break;
+      case 'rewind': this.path = null; this.goal = null; this.pause = 0.6; break;
+      case 'phlost': this.ghostJob = null; break;
+      case 'frozen': this.fz = m.list || []; this.path = null; break;
       case 'end': this.ended = true; break;
     }
   }
@@ -74,7 +79,8 @@ export class Bot {
   onSnap(m) {
     const me = this.p; this.pos = { x: m.you[0], y: m.you[1] }; this.sab = m.sab; this.tk = m.tk; this.ab = m.ab; this.vr = m.vr == null ? 3000 : m.vr; this.loc = m.loc; this.intro = m.intro;
     if (m.cd) { this.cdKill = m.cd[0]; this.sabCd = m.cd[1]; } this.lastRoom = roomName(this.pos.x, this.pos.y);
-    const cur = new Map(); for (const [id, x, y, face, mv, gh, ap, inv] of m.pl) cur.set(id, { id, x, y, mv: !!mv, ghost: !!gh, ap, inv: !!inv });
+    const cur = new Map(); for (const [id, x, y, face, mv, gh, ap, inv] of m.pl) cur.set(id, { id, x, y, mv: !!mv, ghost: !!gh, ph: gh === 2, ap, inv: !!inv });
+    this.xt = m.xt || {}; this.fz = m.fz || [];
     const look = Math.min(this.vr, 420);
     if (me.alive && me.vent < 0 && !this.watching) {
       for (const [id, o] of this.prevVis) if (!cur.has(id) && !o.ghost && dist(o, this.pos) < look * 0.75) { if (VENTS.some(v => dist(v, o) < 70)) this.sus(id, 45, 'vent'); else if (roll(0.7)) this.sus(id, 14, 'sumiu'); }
@@ -94,7 +100,7 @@ export class Bot {
   }
   camLedNear() { return [[1500, 650], [980, 930], [2000, 930], [2000, 1530]].some(([x, y]) => dist({ x, y }, this.pos) < 380); }
   onBody(id, x, y, viaCam) {
-    const b = { id, x, y, t: this.clock, rep: false, cam: !!viaCam, reactAt: this.clock + this.c('bot_react') * rnd(0.4, 1.1) }; this.bodies.set(id, b); this.deadKnown.add(id); this.hiddenDead.delete(id);
+    const b = { id, x, y, t: this.clock, first: this.clock, rep: false, cam: !!viaCam, reactAt: this.clock + this.c('bot_react') * rnd(0.4, 1.1) }; this.bodies.set(id, b); this.deadKnown.add(id); this.hiddenDead.delete(id);
     for (const [pid, o] of this.seen) if (pid !== id && this.clock - o.t < 12 && dist(o, b) < 380) this.sus(pid, (dist(o, b) < 200 ? 28 : 16) * (this.clock - o.t < 3 ? 1 : 0.6), 'near');
     if (this.loc && dist({ x: this.loc[0], y: this.loc[1] }, b) < 450) this.sus(this.loc[2], 18, 'near');
     const cp = this.comp.get(id); if (cp && cp.id !== this.p.id && this.clock - cp.t < 90) this.sus(cp.id, 32, 'last');
@@ -319,27 +325,44 @@ export class Bot {
     const p = this.p, J = this.eff(); this.lastGoalPick = this.clock;
     if (p.alive && this.team === 'neu') { const g = this.neutralGoal(); if (g) return void this.setGoal(g); }
     if (p.alive && this.imp) { const g = this.impGoal(); if (g) return void this.setGoal(g); }
-    if (p.alive && J === 'xerife' || J === 'mentalista') { const t = this.topSuspect(id => !this.known.has(id) || JOB[this.known.get(id)].team !== 'inn'); if (t && t.v > 55 && p.alive && roll(0.6)) return void this.setGoal({ k: 'follow', id: t.id, r: 140, pr: 35, until: this.clock + rnd(10, 22) }); }
-    const pend = this.tasks.filter(t => !t.done), task = this.pc('bot_task');
+    if (p.alive && (J === 'xerife' || J === 'mentalista' || J === 'policial')) { const t = this.topSuspect(id => !this.known.has(id) || JOB[this.known.get(id)].team !== 'inn'); if (t && t.v > 55 && p.alive && roll(0.6)) return void this.setGoal({ k: 'follow', id: t.id, r: 140, pr: 35, until: this.clock + rnd(10, 22) }); }
+    const pend = this.tasks.filter(t => !t.done && this.taskOpen(t)), task = this.pc('bot_task');
     if (pend.length && roll(task)) { const t = this.chooseTask(pend); return void this.setGoal({ k: 'task', id: t.id, x: STN[t.id].x, y: STN[t.id].y + 34, r: 50, pr: 40 }); }
     if (p.alive && roll(this.pc('bot_follow') * 0.5)) { const o = this.someoneRecent(); if (o) return void this.setGoal({ k: 'follow', id: o, r: 160, pr: 30, until: this.clock + rnd(6, 16) }); }
     if (p.alive && !this.imp && roll(this.pc('bot_cam') * 0.1)) return void this.setGoal({ k: 'cam', x: SPECIAL.camConsole.x, y: SPECIAL.camConsole.y + 30, r: 60, pr: 25 });
     this.setGoal(this.wanderGoal());
   }
+  taskOpen(t) { return !this.fz.some(id => ROOM_BY_ID[id]?.name === t.room); }
+  aggr() { const a = this.pc('bot_aggr'); return this.job === 'samurai' ? clamp(a + (this.xt.arm > 0 ? 0.18 : -0.18), 0, 1) : a; }
   chooseTask(pend) { const w = pend.map(t => 1 / (dist(STN[t.id], this.pos) + 250)); let r = Math.random() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < pend.length; i++) { r -= w[i]; if (r <= 0) return pend[i]; } return pend[0]; }
   someoneRecent() { const a = [...this.seen].filter(([id, o]) => this.clock - o.t < 15 && !this.deadKnown.has(id)); return a.length ? pick(a)[0] : null; }
   wanderGoal() { const c = pick(CENTERS); return { k: 'wander', x: c.x + rnd(-110, 110), y: c.y + rnd(-90, 90), r: 60, pr: 10 }; }
   neutralGoal() {
     if (this.job === 'execution' && this.target != null && !this.deadKnown.has(this.target)) { const s = this.seen.get(this.target); if (s && roll(0.8)) return { k: 'follow', id: this.target, r: 150, pr: 35, until: this.clock + rnd(12, 25) }; }
+    if (this.job === 'parinomo' || this.job === 'virus') { const g = this.fuelVirGoal(); if (g) return g; }
     if (this.job === 'joker') { const r = roll(0.5), o = this.someoneRecent(); if (o && r) return { k: 'follow', id: o, r: 90, pr: 35, until: this.clock + rnd(8, 18) }; const b = [...this.bodies.values()][0]; if (b) return { k: 'wander', x: b.x, y: b.y, r: 120, pr: 35 }; }
     return null;
   }
+  fuelVirGoal() {
+    const x = this.xt, pa = this.job === 'parinomo', prog = pa ? x.pf : x.vi, done = pa ? new Set(x.pids || []) : new Set(x.vids || []);
+    if (!prog) return null;
+    if (pa && prog[1] > 0 && prog[0] >= prog[1]) { // todos abastecidos: procurar o isqueiro
+      if (x.hl) return null;
+      if (x.lt) return { k: 'lighter', x: x.lt[0], y: x.lt[1], r: 55, pr: 70 };
+      if (x.ls) { const c = pick(CENTERS); return { k: 'wander', x: c.x + rnd(-110, 110), y: c.y + rnd(-90, 90), r: 80, pr: 50 }; }
+      return null;
+    }
+    if (!pa && prog[1] > 0 && prog[0] >= prog[1]) return null; // pronto para explodir
+    const cand = [...this.seen].filter(([id, o]) => !done.has(id) && !this.deadKnown.has(id) && !o.ghost && this.clock - o.t < 20).sort((a, c) => dist(a[1], this.pos) - dist(c[1], this.pos))[0];
+    if (cand) return { k: 'follow', id: cand[0], r: 70, pr: 60, until: this.clock + rnd(8, 16) };
+    const c = pick(CENTERS); return { k: 'wander', x: c.x + rnd(-110, 110), y: c.y + rnd(-90, 90), r: 80, pr: 20 };
+  }
   impGoal() {
     const ready = this.cdKill === 0 && this.clock - this.gameT0 > 14 && this.clock - this.meetEnd > 8, prey = ready ? this.preyCandidate() : null;
-    if (prey && roll(0.25 + this.pc('bot_aggr') * 0.7)) return { k: 'hunt', id: prey.id, r: 70, pr: 60, until: this.clock + 14 };
-    if (ready && roll(this.pc('bot_aggr') * 0.6)) { const t = this.isolatedTarget(); if (t) return { k: 'seek', x: t.x, y: t.y, r: 120, pr: 45 }; }
-    if (!this.ab.cd.vent && roll(0.05 * this.pc('bot_aggr'))) { const v = VENTS.filter(q => dist(q, this.pos) < 500).sort((a, b) => dist(a, this.pos) - dist(b, this.pos))[0]; if (v) return { k: 'vent', x: v.x, y: v.y + 8, r: 50, pr: 55 }; }
-    const pend = this.tasks.filter(t => !t.done); if (pend.length && roll(0.6)) { const t = this.chooseTask(pend); return { k: 'task', id: t.id, x: STN[t.id].x, y: STN[t.id].y + 34, r: 50, pr: 40, fake: true }; }
+    if (prey && roll(0.25 + this.aggr() * 0.7)) return { k: 'hunt', id: prey.id, r: 70, pr: 60, until: this.clock + 14 };
+    if (ready && roll(this.aggr() * 0.6)) { const t = this.isolatedTarget(); if (t) return { k: 'seek', x: t.x, y: t.y, r: 120, pr: 45 }; }
+    if (!this.ab.cd.vent && roll(0.05 * this.aggr())) { const v = VENTS.filter(q => dist(q, this.pos) < 500).sort((a, b) => dist(a, this.pos) - dist(b, this.pos))[0]; if (v) return { k: 'vent', x: v.x, y: v.y + 8, r: 50, pr: 55 }; }
+    const pend = this.tasks.filter(t => !t.done && this.taskOpen(t)); if (pend.length && roll(0.6)) { const t = this.chooseTask(pend); return { k: 'task', id: t.id, x: STN[t.id].x, y: STN[t.id].y + 34, r: 50, pr: 40, fake: true }; }
     return null;
   }
   preyCandidate() { let best = null, bd = 1e9; for (const o of this.vis.values()) { if (o.ghost || this.mates.has(o.id)) continue; const d = dist(o, this.pos); if (d < bd && this.witnesses(o.id) <= (roll(this.pc('bot_err') * 0.4) ? 1 : 0)) { bd = d; best = o; } } return best; }
@@ -357,7 +380,8 @@ export class Bot {
   moveAlong() {
     const g = this.goal; if (!g || g.done) { this.stop(); return; }
     const d = Math.hypot(g.x - this.pos.x, g.y - this.pos.y); if (d < (g.r ?? 55)) { this.arrive(); return; }
-    if (!this.path || (g.dyn && this.clock > this.repath)) { this.path = findPath(this.pos.x, this.pos.y, g.x, g.y); this.pi = 0; this.repath = this.clock + 0.9; if (!this.path || !this.path.length) { g.done = true; this.stop(); return; } }
+    if (this.ab?.act?.phase > 0) { this.input((g.x - this.pos.x) / (d || 1), (g.y - this.pos.y) / (d || 1)); return; } // Ghost Inc: atravessa em linha reta
+    if (!this.path || (g.dyn && this.clock > this.repath)) { this.path = findPath(this.pos.x, this.pos.y, g.x, g.y, this.fz.length ? this.fz.map(id => ROOM_BY_ID[id]) : null); this.pi = 0; this.repath = this.clock + 0.9; if (!this.path || !this.path.length) { g.done = true; this.stop(); return; } }
     let w = this.path[this.pi]; while (w && Math.hypot(w.x - this.pos.x, w.y - this.pos.y) < 24 && this.pi < this.path.length - 1) { this.pi++; w = this.path[this.pi]; if (roll(0.05 * this.pc('bot_wait') * this.trait.brave)) { this.pause = rnd(0.4, 1.4); } }
     if (!w) return;
     if (this.clock - this.stuckT > 1.4) { if (Math.hypot(this.pos.x - this.stuckP.x, this.pos.y - this.stuckP.y) < 8 && this.lastIn !== '0.0,0.0') this.path = null; this.stuckT = this.clock; this.stuckP = { ...this.pos }; }
@@ -371,6 +395,8 @@ export class Bot {
       case 'fix': this.act({ t: 'fix', id: g.id }); this.pause = rnd(0.3, 0.9); g.done = true; break;
       case 'emerg': this.act({ t: 'emergency' }); this.usedEmerg++; g.done = true; break;
       case 'cam': this.act({ t: 'ab', a: 'cam' }); this.watching = true; this.watchUntil = this.clock + rnd(6, 11); g.done = true; break;
+      case 'lighter': this.act({ t: 'ab', a: 'lighter' }); g.done = true; break;
+      case 'drop': this.act({ t: 'ab', a: 'drop' }); g.done = true; break;
       case 'vent': this.act({ t: 'vent', a: 'in' }); this.ventUntil = this.clock + rnd(2, 5); g.done = true; break;
       case 'wander': case 'seek': case 'flee': g.done = true; this.pause = roll(this.pc('bot_wait')) ? rnd(0.3, 1.6) : 0; break;
       default: break;
@@ -417,10 +443,76 @@ export class Bot {
       case 'mentalista': this.shootCheck(); this.locateSuspect(use); this.probeCheck(use); break;
       case 'localizador': this.locateSuspect(use); break;
       case 'anjo': this.angelTick(use); break;
-      case 'metamorfo': case 'espectro': case 'impostor': case 'vibora': break;
+      case 'redjohn': this.rjCheck(use); this.zoomTick(use); break;
+      case 'policial': this.shootCheck(); this.zoomTick(use); break;
+      case 'hacker': this.hackTick(use); break;
+      case 'ghostinc': this.ghostTick(use); break;
+      case 'timelord': this.rewindTick(use); break;
+      case 'congelador': this.freezeTick(use); break;
+      case 'parinomo': this.paTick(); break;
+      case 'virus': this.virTick(); break;
+      case 'dexter': this.dexTick(use); break;
+      case 'metamorfo': case 'espectro': case 'impostor': case 'vibora': case 'samurai': break;
     }
+    if (p.alive) this.phClickTick(use);
     if (p.alive && this.imp) this.impSab();
     if (p.alive && this.job === 'espectro' && !(ab.cd.invis > 0) && !(ab.act.invis > 0) && this.cdKill === 0 && roll(use * 0.25)) { const pr = this.preyCandidate(); if (pr && dist(pr, this.pos) < 450) this.act({ t: 'ab', a: 'invis' }); }
+  }
+  // ---------- v1.0: habilidades das novas profissões (usam só informação que o bot recebeu) ----------
+  nearVis(r, pred = () => true) { let best = null, bd = r; for (const o of this.vis.values()) { if (o.ghost || !pred(o)) continue; const d = dist(o, this.pos); if (d < bd) { best = o; bd = d; } } return best; }
+  rjCheck(use) {
+    if (!this.p.alive || this.ab.cd.rjinv > 0 || !(this.ab.us.rj > 0) || this.p.vent >= 0 || !roll(0.3 + use * 0.5)) return;
+    const o = this.nearVis(KILL_R - 12, q => !this.mates.has(q.id) && !this.known.has(q.id)); if (o) this.act({ t: 'ab', a: 'rjinv' });
+  }
+  zoomTick(use) {
+    if (!this.p.alive || this.ab.cd.zoom > 0 || this.ab.act.zoom > 0 || !roll(use * 0.04)) return;
+    if (this.imp && !(this.cdKill === 0 && !this.nearVis(500))) return; this.act({ t: 'ab', a: 'zoom' }); // impostor: só quando procura presa
+  }
+  hackTick(use) {
+    if (!this.p.alive) return;
+    if (this.sab?.k === 'comms' && !(this.ab.cd.remoteFix > 0)) { this.act({ t: 'ab', a: 'remoteFix' }); return; }
+    if (!this.watching && !this.sab && this.room.phase === 'play' && this.p.vent < 0 && roll(use * 0.05)) { this.act({ t: 'ab', a: 'cam' }); this.watching = true; this.watchUntil = this.clock + rnd(5, 9); }
+  }
+  ghostTick(use) {
+    const g = this.goal; if (!this.p.alive || !g || g.done || this.ab.cd.phase > 0 || this.ab.act.phase > 0 || !this.path || !roll(use * 0.7)) return;
+    const d = dist(g, this.pos); if (d > 520 || d < 150) return; let len = 0, a = this.pos; for (let i = this.pi; i < this.path.length; i++) { len += dist(a, this.path[i]); a = this.path[i]; }
+    if (len > d * 2.1 || (this.danger && roll(0.5))) this.act({ t: 'ab', a: 'phase' });
+  }
+  rewindTick(use) {
+    if (!this.p.alive || this.ab.cd.rewind > 0 || !(this.ab.us.tl > 0) || !roll(0.3 + use * 0.5)) return;
+    const win = this.c('tl_rew') - 2, b = [...this.bodies.values()].find(q => !q.rep && !q.remote && !q.cam && this.clock - (q.first ?? q.t) < win && this.clock - (q.first ?? q.t) > 0.5);
+    if (b) { this.act({ t: 'ab', a: 'rewind' }); this.lastRewindAt = this.clock; this.bodies.clear(); }
+  }
+  freezeTick(use) {
+    const sel = this.xt.sel || []; if (!this.p.alive || sel.length >= this.c('frz_n') || !roll(0.1 + use * 0.25)) return;
+    const cand = FREEZABLE.filter(id => !this.fz.includes(id) && !sel.includes(id)); if (!cand.length) return;
+    const score = id => { const r = ROOM_BY_ID[id]; let n = 0; for (const o of this.seen.values()) if (this.clock - o.t < 40 && o.x > r.x && o.x < r.x + r.w && o.y > r.y && o.y < r.y + r.h) n++; return n + Math.random() * 1.5; };
+    cand.sort((a, c) => score(c) - score(a)); this.act({ t: 'ab', a: 'freeze', room: cand[0] });
+  }
+  paTick() {
+    const x = this.xt, p = this.p; if (!p.alive) return;
+    if (x.hl) { this.act({ t: 'ab', a: 'ignite' }); return; }
+    if (x.pf && x.pf[1] > 0 && x.pf[0] >= x.pf[1]) { if (x.lt && dist({ x: x.lt[0], y: x.lt[1] }, this.pos) < 95) this.act({ t: 'ab', a: 'lighter' }); return; }
+    if (this.ab.cd.fuel > 0) return; const o = this.nearVis(KILL_R - 12, q => !(x.pids || []).includes(q.id)); if (o) this.act({ t: 'ab', a: 'fuel' });
+  }
+  virTick() {
+    const x = this.xt, p = this.p; if (!p.alive || !x.vi) return;
+    if (x.vi[1] > 0 && x.vi[0] >= x.vi[1]) { if (roll(0.7)) this.act({ t: 'ab', a: 'explode' }); return; }
+    if (this.ab.cd.infect > 0) return; const o = this.nearVis(KILL_R - 12, q => !(x.vids || []).includes(q.id)); if (o) this.act({ t: 'ab', a: 'infect' });
+  }
+  dexTick(use) {
+    const p = this.p; if (!p.alive) return;
+    if (this.xt.carry > 0) {
+      if (!this.goal || this.goal.k !== 'drop') { const hid = ROOMS.filter(r => r.hidden || r.id === 'externa' || r.id === 'geradores'), r = pick(hid); this.setGoal({ k: 'drop', x: r.x + r.w / 2, y: r.y + r.h / 2, r: 70, pr: 85, until: this.clock + 25 }); }
+      if (this.xt.carry <= 3) this.act({ t: 'ab', a: 'drop' }); return;
+    }
+    if (this.ab.cd.bag > 0 || !roll(0.4 + use * 0.5)) return;
+    const b = [...this.bodies.values()].find(q => !q.rep && dist(q, this.pos) < REPORT_R - 25); if (!b) return;
+    if (this.nearVis(450, q => !this.mates.has(q.id) && !q.ghost)) return; // há testemunhas: não arrisca
+    this.act({ t: 'ab', a: 'bag' }); this.bodies.delete(b.id);
+  }
+  phClickTick(use) {
+    if (!roll(0.15 + use * 0.2)) return; const o = [...this.vis.values()].find(q => q.ph && dist(q, this.pos) < PH_R - 20); if (o) this.act({ t: 'ab', a: 'phclick', to: o.id });
   }
   evidence(id) { const j = this.known.get(id); if (j) return JOB[j].team !== 'inn' && j !== 'joker' ? 100 : -100; return this.susp.get(id) ?? 20; }
   shootCheck() {
@@ -512,7 +604,12 @@ export class Bot {
     return res.filter(x => x.at < this.clock + D * 0.9 || true);
   }
   voteTick() {
-    if (this.voted || !this.p.alive || this.phase !== 'vote' || this.clock < this.voteAt) return; this.voted = true; const v = this.decideVote(); this.act({ t: 'vote', to: v.to, sup: v.sup ? 1 : 0 });
+    if (this.voted || !this.p.alive || this.phase !== 'vote' || this.clock < this.voteAt) return; this.voted = true; const v = this.decideVote();
+    if (this.job === 'advogado') { // controla os votos acumulados: guarda quando não há alvo claro, gasta quando há
+      const max = this.c('law_max'); if (v.to === 'skip' && this.bank < max && roll(0.7)) { this.act({ t: 'ab', a: 'lawsave' }); return; }
+      if (v.to !== 'skip' && this.bank > 0) { const strong = (this.evidence(v.to) + this.heatOf(v.to) * 8) >= 90; v.spend = strong ? this.bank : (roll(0.35) ? 1 : 0); }
+    }
+    this.act({ t: 'vote', to: v.to, sup: v.sup ? 1 : 0, spend: v.spend || 0 });
   }
   decideVote() {
     const me = this.p.id, alive = [...this.mtgAlive].filter(i => i !== me), J = this.job, err = roll(this.pc('bot_err') * 0.5);

@@ -32,7 +32,7 @@ wss.on('connection', ws => {
   const err = msg => ws.send(JSON.stringify({ t: 'err', msg }));
   const bind = r => { if (!r.p) return err(r.err || 'Erro.'); c.room = r.room; c.p = r.p; };
   ws.on('message', raw => {
-    const now = Date.now(); if (now - c.t0 > 1000) { c.t0 = now; c.n = 0; } if (++c.n > 120) return; // limite de mensagens/s
+    const now = Date.now(); if (now - c.t0 > 1000) { c.t0 = now; c.n = 0; } if (++c.n > 240) return; // limite de mensagens/s
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
     if (!c.p) {

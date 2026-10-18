@@ -1,4 +1,4 @@
-# Quórum — Estação Halcyon (v1.0)
+# Quórum — Estação Halcyon (v1.5)
 
 Jogo 2D multiplayer de dedução social (4–15 jogadores). Servidor autoritativo em Node.js + WebSocket; cliente em Canvas 2D (sem build, sem assets externos: arte vetorial e áudio sintetizados).
 
@@ -79,3 +79,23 @@ Loja de moedas/desbloqueios, XP/nível/perfil/estatísticas com salvamento no se
 
 **Cosméticos:** +12 cores (24), +10 chapéus, +10 roupas, +10 acessórios, +10 mascotes, +10 skins — desenhados em `client/js/cosdraw.js`. **Cores únicas:** o servidor garante (humanos e bots); cores ocupadas aparecem riscadas; a partida não inicia com cor repetida.
 **Tarefas novas (6 tipos, 12 estações):** sequência (Simon), memória (pares), sliders, observação, bomba multi-etapas, deslizar cartão. **Bots:** comportamento por profissão em `server/bot.js` (usam só as informações que receberam). **Mobile:** botão ✕ no mapa grande; botão do Metamorfo/habilidades reorganizados e sem "clique fantasma" no seletor.
+
+## v1.5 — Bots mais espertos, HUD mobile, Médico e Lovers
+Testes automatizados (sem navegador/rede): `node test/t_medic_lovers.mjs`, `node test/t_bots.mjs`, `node test/t_medic_bot.mjs`, `node test/t_bot_brain.mjs`.
+
+### Bots (`server/bot.js`, `server/nav.js`)
+- **Consciência de profissões (só por observação):** viu alguém mudar de aparência → deduz Metamorfo e conta na reunião ("Vi o X (laranja) virar Y (amarela)… é Metamorfo"); corpo que some → Víbora; corpo com cortes → Samurai; rosto chorando → Red John; saco de corpo → Dexter; corpo arrastado → Médico. Nada disso lê o estado do servidor.
+- **Time Lord / Médico:** ao ver o tempo voltar, alguém "morto" aparecer vivo, corpo sendo arrastado, ou uma alegação confiável dessas profissões, os bots inocentes **esperam 9–20 s antes de reportar** (o Time Lord só reporta depois de tentar retroceder; o Médico tenta carregar o corpo até a Enfermaria). Um bot ressuscitado lembra **quem o matou** (a cena de morte mostrou) e corre ao botão de emergência / conta na reunião; quem ouve "X me matou" dá peso alto à acusação.
+- **Votos sem aleatoriedade:** sem motivo concreto (kill, duto, transformação, duplicidade, último com a vítima, informação de habilidade) o bot **pula**; erro humano raramente vira voto aleatório; com poucos vivos ele aceita votar com menos prova.
+- **Confiança:** alegações "eu sou X" são aceitas bem menos (≈ 14 % sem prova, antes ≈ 72 %), caem se vierem logo após uma acusação, são checadas contra o que o bot viu e contra a própria profissão (ex.: duas alegações de um cargo único).
+- **Vocabulário:** entende (sem acento) "pula o voto / skipa / skipar / ninguém vota", "votem no X", "eu sou <qualquer profissão>" (inclui Time Lord, Ghost Inc, Red John, Médico, Lovers), "X me matou", "fui ressuscitado", "concordo / discordo / confia em mim / quem morreu". Pedidos de skip e de voto só pesam conforme a confiança em quem falou.
+- **Navegação:** destrava (anda de lado, replaneja, descarta alvo inalcançável por 30–45 s), evita se amontoar em tarefas/salas com muita gente.
+
+### HUD mobile (`client/css/style.css`, `client/js/main.js`)
+Bloco final do CSS consolidado: áreas seguras nos 4 lados, `dvh`, botões ≥ 44 px com toque sempre no botão (filhos sem eventos), `#acts` que não passa do limite da tela, rolagem interna em tarefas/seleção/lista final, rodapé da reunião que quebra linha, sem `backdrop-filter` nem brilho pesado no toque. Menos DOM: o objetivo e os botões só reescrevem texto quando mudam.
+
+### Médico (inocente, nome em gradiente vermelho→azul)
+PEGAR corpo (um só carregador por corpo; some após `med_carry` s) → levar até a **Enfermaria** → REVIVER. O servidor valida: Médico vivo, dentro da Enfermaria, corpo válido dentro da Enfermaria, recarga (`med_cd`), usos (`med_uses`), **cada jogador só pode ser ressuscitado 1 vez** (não duplica corpo/personagem). Volta com a mesma profissão/equipe, recargas zeradas (impostor volta com 12 s de espera para matar). Limites: só na fase de jogo (reunião apaga os corpos); só há corpo para morte por ataque/tiro/vínculo — ejeção, explosão do Vírus e corpo de Víbora que sumiu não podem ser revividos; se o jogo já terminou (`checkWin`) não há ressurreição. Lovers: só volta se o par também tem corpo válido; os dois voltam juntos.
+
+### Lovers (inocente, nome rosa)
+Par de **exatamente 2** Tripulantes comuns (nunca rouba outra profissão); chance = `w_lovers` %, `m_lovers` = 1 par. Só os dois recebem o parceiro (`lover` no payload de início) e o painel privado (`xt.lv` no snapshot). **Morte vinculada:** morrer (ataque, tiro, voto, explosão) leva o outro com `force`; o par entra com `link:true`, então não há cascata nem evento duplicado (um log `[morte-lovers]`). Quando **os dois** terminam as tarefas (tarefa em área congelada não bloqueia) o botão **DESCOBRIR** libera; o servidor sorteia **um impostor vivo** no momento do uso e manda só aos dois; se não há impostor vivo, não revela nada. Repetir devolve o mesmo resultado. Investigações (Mentalista/Red John) mostram Lovers como Tripulante. Vitória: sem condição própria — continua sendo a da equipe inocente (tarefas / eliminar impostores); a morte dupla pode custar dois votos de maioria, o que já é tratado por `checkWin`.

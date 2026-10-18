@@ -185,3 +185,59 @@ body.pc #lobby{align-items:center;gap:22px}body.pc .lobbyL{align-self:center}bod
 .pk.dead{opacity:.62;border-color:#5a2030}.pk.dead span{text-decoration:line-through;color:#ff8da1}
 #meetc{position:fixed;inset:0;width:100%;height:100%;z-index:36;pointer-events:none}
 .card2 .chip.off{left:6px;right:auto;top:6px;background:#6b7390;color:#fff;font-size:10px;padding:0 7px}
+
+/* botões do HUD sempre acima da área do joystick */
+#hud{z-index:9}#joyZone{width:42%}
+
+/* v1.0: fechar mapa grande */
+#bigX{position:fixed;z-index:12;top:calc(10px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));width:48px;height:48px;border-radius:50%;border:2px solid var(--line);background:var(--pan);color:var(--txt);font-size:22px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+#bigmap{max-height:92vh;width:min(880px,92vw,calc(92vh*1.725))}
+/* v1.0: botões de ação no celular (Metamorfo/Espectro e outros com até 8 botões) */
+body.touch #acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,62px));direction:rtl;justify-content:end;align-items:end;max-width:min(62vw,330px);gap:6px}
+body.touch #acts>*{direction:ltr}body.touch #abil{display:contents}
+body.touch #acts button{width:100%;aspect-ratio:1;height:auto;min-width:0;padding:2px;overflow:hidden;line-height:1.05;text-align:center;word-break:keep-all;touch-action:manipulation}
+body.touch #acts button.long{font-size:7px;letter-spacing:-.2px}
+body.touch #acts button.main{grid-column:span 2;width:100%;max-width:92px;justify-self:end}
+@media (max-height:380px){body.touch #acts{grid-template-columns:repeat(auto-fit,minmax(48px,52px))}body.touch #acts button.main{max-width:76px}}
+
+.sw i.busy{opacity:.28;position:relative;cursor:not-allowed}.sw i.busy::after{content:'✕';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-style:normal;text-shadow:0 0 3px #000}
+.sw{flex-wrap:wrap}
+
+/* v1.0: novas tarefas */
+.pads{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:min(280px,70vw);margin:8px auto}.pads button{aspect-ratio:1.4;border-radius:16px;border:3px solid rgba(255,255,255,.15);background:color-mix(in srgb,var(--c) 45%,#10182e);cursor:pointer;touch-action:manipulation}.pads button.lit{background:var(--c);box-shadow:0 0 24px var(--c);transform:scale(1.04)}
+.mem{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:min(300px,76vw);margin:8px auto}.mem button{aspect-ratio:1;border-radius:12px;border:2px solid var(--line);background:#1a2340;color:#fff;font-size:26px;font-weight:800;cursor:pointer;touch-action:manipulation}.mem button.on{background:#2b3a66}.mem button.ok{background:#1f6b45;border-color:#6bd968}
+.slid{display:flex;flex-direction:column;gap:18px;width:min(300px,76vw);margin:10px auto}.srow{position:relative;padding:12px 0}.srow input{width:100%;height:30px}.srow .mk{position:absolute;top:6px;width:4px;height:36px;margin-left:-2px;background:#6bd968;border-radius:2px;pointer-events:none}.srow.good .mk{box-shadow:0 0 10px #6bd968}
+.spotg{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;width:min(300px,76vw);margin:8px auto}.spotg button{aspect-ratio:1;border-radius:10px;border:2px solid var(--line);background:#1a2340;color:#fff;font-size:24px;font-weight:700;cursor:pointer;touch-action:manipulation}
+.pgauge{position:relative;width:60px;height:170px;margin:8px auto;border:3px solid var(--line);border-radius:12px;background:#0b1226;overflow:hidden}.pzone{position:absolute;left:0;right:0;background:rgba(107,217,104,.35);border-top:2px solid #6bd968;border-bottom:2px solid #6bd968}.pfill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(#ff7ac8,#ff4f6d)}
+.swp{position:relative;width:min(320px,78vw);height:70px;margin:12px auto;background:#10182e;border:2px solid var(--line);border-radius:14px;touch-action:none}.swp .track{position:absolute;left:10px;right:10px;top:50%;height:4px;margin-top:-2px;background:#2a3556;border-radius:2px}.card2s{position:absolute;top:8px;width:74px;height:50px;border-radius:8px;background:#e0e0ff;color:#2a3556;font-size:28px;display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;user-select:none}
+#hList li.fz{opacity:.4;text-decoration:line-through}
+
+/* ================= v1.5 — correções do HUD mobile (consolidadas; vêm por último de propósito) ================= */
+button,.btn,#acts button,#pick button,#task button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{overscroll-behavior:none}
+/* painel privado dos Lovers */
+#hLov{position:absolute;left:18px;bottom:18px;max-width:min(46vw,420px);background:var(--pan);border:2px solid #ff7ac8;border-radius:12px;padding:6px 12px;font-size:13px;font-weight:700;line-height:1.25;pointer-events:none;color:#ffd1ea}
+#hLov.hide{display:none}
+body.touch #hLov{left:calc(8px + env(safe-area-inset-left));bottom:auto;top:calc(76px + env(safe-area-inset-top));max-width:min(42vw,300px);font-size:11px;padding:4px 8px;border-width:1.5px}
+/* botões: alvo de toque nunca menor que o desenho e ≥ 44px; nada passa das bordas/áreas seguras */
+body.touch #acts{right:calc(10px + env(safe-area-inset-right));bottom:calc(10px + env(safe-area-inset-bottom));max-width:min(60vw,340px);z-index:10;pointer-events:none}
+body.touch #acts>button,body.touch #abil>button{pointer-events:auto;min-width:44px;min-height:44px;margin:0}
+body.touch #acts button small{pointer-events:none}
+body.touch #acts button *{pointer-events:none} /* o toque sempre cai no botão, nunca em um filho */
+body.touch #acts button.long{font-size:8px}
+body.touch #bFull{z-index:11;width:44px;height:44px}
+body.touch #hTasks{max-width:calc(100vw - 180px);overflow:hidden}
+body.touch #hObj,body.touch #hSab{max-width:calc(100vw - 2*(150px + env(safe-area-inset-left)));overflow-wrap:anywhere}
+body.touch #joyZone{left:env(safe-area-inset-left);z-index:8;width:calc(42% - env(safe-area-inset-left))}
+@media (max-height:420px){body.touch #acts{grid-template-columns:repeat(auto-fit,minmax(46px,50px));gap:4px;max-width:min(62vw,300px)}body.touch #acts button.main{max-width:70px}body.touch #hLov{top:calc(64px + env(safe-area-inset-top))}}
+/* telas inteiras: altura dinâmica (barra do navegador) e rolagem interna em vez de cortar */
+.screen{min-height:100vh;min-height:100dvh}
+#task .card,#pick .card{max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow-y:auto;-webkit-overflow-scrolling:touch}
+#eList{max-height:48dvh;overflow-y:auto}
+.mFoot{flex-wrap:wrap;padding-bottom:calc(8px + env(safe-area-inset-bottom));padding-left:calc(8px + env(safe-area-inset-left));padding-right:calc(8px + env(safe-area-inset-right))}
+#mAb{display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:100%}
+.mBody{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* celulares de menor desempenho: sem desfoque em tempo real, sem brilhos pesados */
+body.touch .panel,body.touch #hTasks,body.touch #mapbox{backdrop-filter:none;-webkit-backdrop-filter:none}
+body.touch #acts button.rdy{box-shadow:none}
+body.touch #meeting *{animation-duration:.01ms!important}

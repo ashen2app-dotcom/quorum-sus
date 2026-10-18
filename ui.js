@@ -1,8 +1,10 @@
 // Telas DOM: menus, lobby, personalização, configurações, reunião e fim de partida.
 import { drawCrew, setQuality } from './render.js';
-import { COLORS, HATS, OUTFITS, ACCS, MASCOTS, SKINS } from '/shared/cosmetics.js';
+import { COLORS, COLOR_NAMES, HATS, OUTFITS, ACCS, MASCOTS, SKINS } from '/shared/cosmetics.js';
+export const TAKEN = new Set(); // cores ocupadas por outros jogadores (atualizado pelo lobby)
+const UI_TOAST = m => toast(m);
 import { sfx, setVol, A } from './audio.js';
-import { JOBS, JOB, PARAMS, BOT_PARAMS, TEAMS, SETTING_LIMITS } from '/shared/jobs.js';
+import { JOBS, JOB, PARAMS, BOT_PARAMS, TEAMS, SETTING_LIMITS, paintJob } from '/shared/jobs.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
@@ -50,7 +52,7 @@ let draft = null;
 export function initCustom(look, onSave) {
   draft = { ...look }; const box = $('cOpts'); box.innerHTML = '';
   const cr = el('div', 'opt'); cr.append(el('label', null, 'Cor')); const sw = el('div', 'sw');
-  COLORS.forEach((col, i) => { const d = el('i'); d.style.background = col; d.className = i === draft.c ? 'on' : ''; d.onclick = () => { draft.c = i; sw.querySelectorAll('i').forEach((x, j) => x.classList.toggle('on', j === i)); sfx('click'); }; sw.append(d); }); cr.append(sw); box.append(cr);
+  COLORS.forEach((col, i) => { const d = el('i'), busy = TAKEN.has(i) && i !== look.c; d.style.background = col; d.title = COLOR_NAMES[i] + (busy ? ' (em uso)' : ''); d.className = (i === draft.c ? 'on' : '') + (busy ? ' busy' : ''); d.onclick = () => { if (busy) return UI_TOAST('Essa cor já está em uso por outro jogador.'); draft.c = i; sw.querySelectorAll('i').forEach((x, j) => x.classList.toggle('on', j === i)); sfx('click'); }; sw.append(d); }); cr.append(sw); box.append(cr);
   for (const [label, k, arr] of ROWS) {
     const r = el('div', 'opt'), v = el('span', 'v', arr[draft[k]]), mk = d => { const b = el('button', null, d < 0 ? '‹' : '›'); b.onclick = () => { draft[k] = (draft[k] + d + arr.length) % arr.length; v.textContent = arr[draft[k]]; sfx('click'); }; return b; };
     r.append(el('label', null, label), mk(-1), v, mk(1)); box.append(r);
@@ -145,12 +147,13 @@ export function renderJobs(L, myId, send) {
     return;
   }
   for (const j of JOBS.filter(x => x.team === jtab)) {
-    const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); nm.style.color = j.color === '#111419' ? '#e9f1ff' : j.color;
+    const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); paintJob(nm, j);
     row.append(nm, el('small', null, j.desc + (j.ghost ? ' (só recebida após morrer)' : '')), slider(j.ghost ? 'Chance ao morrer' : 'Chance de aparecer', 'w_' + j.id, 0, 100, 5, v => v + '%'));
     if (j.id !== 'tripulante') row.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v)); body.append(row);
   }
 }
 // ---------- seleção de jogador / mensagem / painel ----------
+const lockPick = p => { p.style.pointerEvents = 'none'; clearTimeout(lockPick.t); lockPick.t = setTimeout(() => { p.style.pointerEvents = ''; }, 450); }; // evita o 'clique fantasma' do toque que abriu o seletor
 export function pick(title, items, cb) {
   const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; l.innerHTML = '';
   for (const it of items) {
@@ -160,20 +163,21 @@ export function pick(title, items, cb) {
     if (cb && !it.dead) b.onclick = () => { p.classList.remove('on'); sfx('click'); cb(it.id); }; else b.disabled = true;
     l.append(b);
   }
-  $('pkX').onclick = () => p.classList.remove('on'); p.classList.add('on');
+  $('pkX').onclick = () => p.classList.remove('on'); lockPick(p); p.classList.add('on');
 }
 export function pickText(title, opts, cb) {
   const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; l.innerHTML = '';
   for (const o of opts) { const b = el('button', 'pk', o.label); b.onclick = () => { p.classList.remove('on'); sfx('click'); cb(o.id); }; l.append(b); }
-  $('pkX').onclick = () => p.classList.remove('on'); p.classList.add('on');
+  $('pkX').onclick = () => p.classList.remove('on'); lockPick(p); p.classList.add('on');
 }
 
 // ---------- fim ----------
-const WIN = { crew: ['EQUIPE VENCEU', '#2de2c5', 'rgba(20,90,80,.8)'], imp: ['IMPOSTORES VENCERAM', '#ff4f6d', 'rgba(110,15,40,.8)'], joker: ['JOKER VENCEU', '#c3c9d6', 'rgba(70,74,90,.85)'], exec: ['EXECUTION VENCEU', '#ff8a1f', 'rgba(120,60,10,.85)'] };
+const WIN = { crew: ['EQUIPE VENCEU', '#2de2c5', 'rgba(20,90,80,.8)'], imp: ['IMPOSTORES VENCERAM', '#ff4f6d', 'rgba(110,15,40,.8)'], joker: ['JOKER VENCEU', '#c3c9d6', 'rgba(70,74,90,.85)'], exec: ['EXECUTION VENCEU', '#ff8a1f', 'rgba(120,60,10,.85)'],
+  congelador: ['CONGELADOR VENCEU', '#7DF9FF', 'rgba(20,80,100,.85)'], parinomo: ['PARINOMO VENCEU', '#FFA500', 'rgba(120,60,0,.85)'], virus: ['VÍRUS VENCEU', '#22A447', 'rgba(10,70,30,.85)'], phantom: ['PHANTOM VENCEU', '#FFFFFF', 'rgba(70,74,90,.85)'] };
 export function showEnd(m, roster, me) {
   const [title, col, bg] = WIN[m.winner] || WIN.crew, t = $('eTitle'); t.textContent = title; t.style.color = col; t.style.textShadow = `0 0 40px ${col}`;
   $('eReason').textContent = m.reason; const l = $('eList'); l.innerHTML = '';
-  for (const [id, role, alive, job] of m.roles) { const p = roster.get(id), J = JOB[job], d = el('div', role === 'imp' ? 'imp' : '', `${p?.name || '?'} · `); const s = el('b', null, J?.name || '?'); s.style.color = J?.color === '#111419' ? '#e9f1ff' : J?.color; d.append(s, document.createTextNode(alive ? '' : ' ☠')); l.append(d); }
+  for (const [id, role, alive, job] of m.roles) { const p = roster.get(id), J = JOB[job], d = el('div', role === 'imp' ? 'imp' : '', `${p?.name || '?'} · `); const s = el('b', null, J?.name || '?'); paintJob(s, J); d.append(s, document.createTextNode(alive ? '' : ' ☠')); l.append(d); }
   $('end').style.background = `radial-gradient(circle,${bg},rgba(4,8,18,.96))`; show('end');
   const won = m.winner === 'crew' ? me.team !== 'imp' && !['joker', 'execution'].includes(me.job) : m.winner === 'imp' ? me.team === 'imp' : m.winner === 'joker' ? me.job === 'joker' : me.job === 'execution';
   sfx(won ? 'win' : 'lose');

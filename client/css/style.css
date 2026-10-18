@@ -211,3 +211,33 @@ body.touch #acts button.main{grid-column:span 2;width:100%;max-width:92px;justif
 .pgauge{position:relative;width:60px;height:170px;margin:8px auto;border:3px solid var(--line);border-radius:12px;background:#0b1226;overflow:hidden}.pzone{position:absolute;left:0;right:0;background:rgba(107,217,104,.35);border-top:2px solid #6bd968;border-bottom:2px solid #6bd968}.pfill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(#ff7ac8,#ff4f6d)}
 .swp{position:relative;width:min(320px,78vw);height:70px;margin:12px auto;background:#10182e;border:2px solid var(--line);border-radius:14px;touch-action:none}.swp .track{position:absolute;left:10px;right:10px;top:50%;height:4px;margin-top:-2px;background:#2a3556;border-radius:2px}.card2s{position:absolute;top:8px;width:74px;height:50px;border-radius:8px;background:#e0e0ff;color:#2a3556;font-size:28px;display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;user-select:none}
 #hList li.fz{opacity:.4;text-decoration:line-through}
+
+/* ================= v1.5 — correções do HUD mobile (consolidadas; vêm por último de propósito) ================= */
+button,.btn,#acts button,#pick button,#task button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{overscroll-behavior:none}
+/* painel privado dos Lovers */
+#hLov{position:absolute;left:18px;bottom:18px;max-width:min(46vw,420px);background:var(--pan);border:2px solid #ff7ac8;border-radius:12px;padding:6px 12px;font-size:13px;font-weight:700;line-height:1.25;pointer-events:none;color:#ffd1ea}
+#hLov.hide{display:none}
+body.touch #hLov{left:calc(8px + env(safe-area-inset-left));bottom:auto;top:calc(76px + env(safe-area-inset-top));max-width:min(42vw,300px);font-size:11px;padding:4px 8px;border-width:1.5px}
+/* botões: alvo de toque nunca menor que o desenho e ≥ 44px; nada passa das bordas/áreas seguras */
+body.touch #acts{right:calc(10px + env(safe-area-inset-right));bottom:calc(10px + env(safe-area-inset-bottom));max-width:min(60vw,340px);z-index:10;pointer-events:none}
+body.touch #acts>button,body.touch #abil>button{pointer-events:auto;min-width:44px;min-height:44px;margin:0}
+body.touch #acts button small{pointer-events:none}
+body.touch #acts button *{pointer-events:none} /* o toque sempre cai no botão, nunca em um filho */
+body.touch #acts button.long{font-size:8px}
+body.touch #bFull{z-index:11;width:44px;height:44px}
+body.touch #hTasks{max-width:calc(100vw - 180px);overflow:hidden}
+body.touch #hObj,body.touch #hSab{max-width:calc(100vw - 2*(150px + env(safe-area-inset-left)));overflow-wrap:anywhere}
+body.touch #joyZone{left:env(safe-area-inset-left);z-index:8;width:calc(42% - env(safe-area-inset-left))}
+@media (max-height:420px){body.touch #acts{grid-template-columns:repeat(auto-fit,minmax(46px,50px));gap:4px;max-width:min(62vw,300px)}body.touch #acts button.main{max-width:70px}body.touch #hLov{top:calc(64px + env(safe-area-inset-top))}}
+/* telas inteiras: altura dinâmica (barra do navegador) e rolagem interna em vez de cortar */
+.screen{min-height:100vh;min-height:100dvh}
+#task .card,#pick .card{max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow-y:auto;-webkit-overflow-scrolling:touch}
+#eList{max-height:48dvh;overflow-y:auto}
+.mFoot{flex-wrap:wrap;padding-bottom:calc(8px + env(safe-area-inset-bottom));padding-left:calc(8px + env(safe-area-inset-left));padding-right:calc(8px + env(safe-area-inset-right))}
+#mAb{display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:100%}
+.mBody{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* celulares de menor desempenho: sem desfoque em tempo real, sem brilhos pesados */
+body.touch .panel,body.touch #hTasks,body.touch #mapbox{backdrop-filter:none;-webkit-backdrop-filter:none}
+body.touch #acts button.rdy{box-shadow:none}
+body.touch #meeting *{animation-duration:.01ms!important}

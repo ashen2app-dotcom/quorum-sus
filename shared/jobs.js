@@ -37,6 +37,9 @@ export const JOBS = [
   j('redjohn', 'Red John', 'imp', '#FF0000', 'Impostor: deixa um rosto vermelho chorando nas vítimas, investiga profissões e amplia o mapa.', 40, 1),
   j('samurai', 'Samurai', 'imp', '#FF0000', 'Impostor: elimina mais rápido; depois de matar corre e fica invisível por alguns segundos; tem armadura que bloqueia 1 morte por rodada.', 40, 1),
   j('dexter', 'Dexter', 'imp', '#233D72', 'Impostor: guarda corpos em sacos, carrega e os esconde por alguns segundos.', 40, 1),
+  // ---- v1.5 ----
+  { ...j('medico', 'Médico', 'inn', '#ff4f6d', 'Carrega corpos até a Enfermaria e, lá, ressuscita o jogador (mesma profissão e equipe).', 40, 1), color2: '#4aa8ff' },
+  { ...j('lovers', 'Lovers', 'inn', '#ff7ac8', 'Dois jogadores ligados: se um morre o outro morre junto. Quando os dois terminam as tarefas, descobrem um impostor vivo.', 40, 1), pair: true },
 ];
 export const JOB = Object.fromEntries(JOBS.map(x => [x.id, x]));
 // Parâmetros configuráveis pelo host (k, rótulo, mín, máx, passo, padrão)
@@ -63,6 +66,7 @@ const PARAMS_RAW = [
   P('frz_n', 'Congelador: áreas por rodada', 1, 5, 1, 3, 'Congelador'), P('frz_cd', 'Congelador: recarga a cada área (s)', 10, 300, 5, 60, 'Congelador'), P('frz_win', 'Congelador: áreas congeladas para vencer', 1, 8, 1, 5, 'Congelador'),
   P('pa_cd', 'Parinomo: recarga do abastecimento (s)', 3, 60, 1, 10, 'Parinomo'), P('pa_resp', 'Parinomo: isqueiro reaparece a cada (s)', 15, 120, 5, 45, 'Parinomo'),
   P('vir_cd', 'Vírus: recarga da infecção (s)', 3, 60, 1, 10, 'Vírus'),
+  P('med_cd', 'Médico: recarga da ressuscitação (s)', 5, 180, 5, 40, 'Médico'), P('med_uses', 'Médico: ressuscitações por partida', 1, 6, 1, 2, 'Médico'), P('med_carry', 'Médico: tempo máximo carregando um corpo (s)', 10, 120, 5, 60, 'Médico'),
   P('ph_tasks', 'Phantom: tarefas para vencer', 1, 20, 1, 12, 'Phantom'), P('ph_hid', 'Phantom: tempo oculto (s)', 5, 60, 1, 20, 'Phantom'), P('ph_vis', 'Phantom: tempo visível (s)', 3, 30, 1, 10, 'Phantom'),
 ];
 export const PARAMS = PARAMS_RAW.filter((p, i, a) => a.findIndex(q => q.k === p.k) === i); // chaves únicas
@@ -70,6 +74,7 @@ export const DEFAULT_SETTINGS = { neutrals: 1 };
 export const SETTING_LIMITS = { neutrals: [0, 4] };
 for (const x of JOBS) { DEFAULT_SETTINGS['w_' + x.id] = x.w; DEFAULT_SETTINGS['m_' + x.id] = x.m; SETTING_LIMITS['w_' + x.id] = [0, 100]; SETTING_LIMITS['m_' + x.id] = [0, x.m > 4 ? 15 : 4]; }
 for (const x of PARAMS) { DEFAULT_SETTINGS[x.k] = x.def; SETTING_LIMITS[x.k] = [x.min, x.max]; }
+SETTING_LIMITS.m_lovers = [0, 1]; // 1 par (exatamente dois jogadores); w_lovers = chance (%) de o par aparecer na partida
 // Habilidades ativas mostradas como botões: [id, rótulo]
 export const ABIL = {
   detetive: [['investigate', 'INVESTIGAR']], engenheiro: [['remoteFix', 'CONSERTAR']], cientista: [['panel', 'PAINEL']], localizador: [['locate', 'LOCALIZAR']],
@@ -77,6 +82,7 @@ export const ABIL = {
   policial: [['skill', 'ATIRAR'], ['zoom', 'ZOOM']], hacker: [['cam', 'CÂMERAS'], ['remoteFix', 'CONSERTAR']], ghostinc: [['phase', 'ATRAVESSAR']], timelord: [['rewind', 'RETROCEDER']],
   advogado: [['lawsave', 'GUARDAR VOTO']], congelador: [['freeze', 'CONGELAR']], parinomo: [['fuel', 'ABASTECER'], ['ignite', 'INCENDIAR']], virus: [['infect', 'INFECTAR'], ['explode', 'EXPLODIR']],
   phantom: [], redjohn: [['rjinv', 'INVESTIGAR'], ['zoom', 'ZOOM']], samurai: [['armor', 'ARMADURA']], dexter: [['bag', 'ENSACAR'], ['drop', 'SOLTAR']],
+  medico: [['mcarry', 'PEGAR'], ['mdrop', 'SOLTAR'], ['revive', 'REVIVER']], lovers: [['lovfind', 'DESCOBRIR']],
   anjo: [['shield', 'ESCUDO']], influencer: [['infmsg', 'MENSAGEM']], metamorfo: [['morph', 'TRANSFORMAR']], espectro: [['invis', 'INVISIBILIDADE']],
 };
 export const INF_MSGS = [['tone', 'Cor de quem me matou'], ['job', 'Profissão de quem me matou'], ['where', 'Onde fui morto']];
@@ -95,3 +101,9 @@ export const BOT_PARAMS = [
   P('bot_talk', 'Quanto falam nas reuniões (%)', 0, 100, 5, 60, 'Reuniões'), P('bot_gap_all', 'Intervalo entre mensagens de bots (s)', 0.5, 15, 0.5, 3.5, 'Velocidade do chat'), P('bot_gap_own', 'Intervalo mínimo entre mensagens do mesmo bot (s)', 1, 30, 1, 6, 'Velocidade do chat'),
 ];
 for (const x of BOT_PARAMS) { DEFAULT_SETTINGS[x.k] = x.def; SETTING_LIMITS[x.k] = [x.min, x.max]; }
+
+// v1.5: aplica a cor do nome da profissão a um elemento (Médico usa gradiente vermelho→azul).
+export function paintJob(el, j) {
+  if (j && j.color2) { el.style.background = `linear-gradient(90deg,${j.color},${j.color2})`; el.style.webkitBackgroundClip = 'text'; el.style.backgroundClip = 'text'; el.style.webkitTextFillColor = 'transparent'; el.style.color = 'transparent'; }
+  else el.style.color = !j ? '' : j.color === '#111419' ? '#e9f1ff' : j.color;
+}

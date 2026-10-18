@@ -26,7 +26,7 @@ const dec = (o, dt, fn) => { for (const k in o) { o[k] -= dt; if (o[k] <= 0) { d
 export class Room {
   constructor(code, onEmpty) {
     Object.assign(this, { code, onEmpty, players: new Map(), hostId: null, settings: { ...DEFAULTS }, pub: false,
-      phase: 'lobby', bodies: [], sab: null, sabCd: 0, timer: 0, loop: null, n: 0, nextId: 1, last: Date.now(), meet: null, supreme: null, sups: new Map(), ghostN: {}, botText: '', frozen: new Set(), lighter: null, hist: [], clockT: 0, histMin: 0, neuT: 0 });
+      phase: 'lobby', bodies: [], sab: null, sabCd: 0, timer: 0, loop: null, n: 0, nextId: 1, last: Date.now(), meet: null, supreme: null, sups: new Map(), ghostN: {}, botText: '', frozen: new Set(), lighter: null, hist: [], clockT: 0, histMin: 0, neuT: 0, pair: null });
   }
   get list() { return [...this.players.values()]; }
   send(p, m) { if (p.bot) { try { p.ai.onMsg(m); } catch (e) { console.error('[bot]', e); } return; } if (p.ws && p.ws.readyState === 1) p.ws.send(JSON.stringify(m)); }
@@ -57,7 +57,7 @@ export class Room {
       x: 0, y: 0, ix: 0, iy: 0, face: 1, moving: false, alive: true, role: null, team: null, job: null, ghostJob: null, tasks: [], ts: {}, killCd: 0, emerg: 0, vent: -1,
       vote: null, voted: false, chatAt: 0, dcAt: 0, gone: false, cd: {}, act: {}, uses: {}, shieldT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
       killedBy: null, deathRoom: '', target: null, seen: new Set(), revealed: false, sciWait: false, watch: false,
-      armor: 0, bank: 0, voteW: 1, inf: false, fuel: false, hasLighter: false, phT: 0, phLost: false, frzSel: [], carry: null, carryT: 0 }; }
+      armor: 0, bank: 0, voteW: 1, inf: false, fuel: false, hasLighter: false, phT: 0, phLost: false, phTasks: [], frzSel: [], carry: null, carryT: 0, lover: null, medRev: false }; }
   botCount() { const S = this.settings; return S.bot_on ? Math.max(0, Math.min(S.bot_n, MAX_PLAYERS - this.humansList().length)) : 0; }
   botNameList(nb) {
     const taken = new Set(this.list.map(q => q.name.toLowerCase())), out = [];
@@ -119,7 +119,7 @@ export class Room {
   assign(ps, ni, nn) {
     const S = this.settings, cnt = {};
     const draw = (team, fallback) => {
-      const pool = JOBS.filter(j => j.team === team && !j.ghost && S['w_' + j.id] > 0 && (cnt[j.id] || 0) < S['m_' + j.id]);
+      const pool = JOBS.filter(j => j.team === team && !j.ghost && S['w_' + j.id] > 0 && (cnt[j.id] || 0) < S['m_' + j.id] && !j.pair);
       const sum = pool.reduce((a, j) => a + S['w_' + j.id], 0); if (!pool.length || sum <= 0) return fallback;
       let r = Math.random() * sum; for (const j of pool) { r -= S['w_' + j.id]; if (r <= 0) { cnt[j.id] = (cnt[j.id] || 0) + 1; return j.id; } }
       return pool[pool.length - 1].id;
@@ -129,6 +129,12 @@ export class Room {
       if (!job) job = draw('inn', 'tripulante'); // vaga neutra sem profissão disponível vira inocente
       q.job = job; q.team = JOB[job].team; q.role = q.team === 'imp' ? 'imp' : 'crew';
     });
+    // v1.5 Lovers: exatamente dois Tripulantes comuns viram o par (chance configurável; nunca rouba outra profissão)
+    this.pair = null; for (const q of ps) { q.lover = null; q.medRev = false; }
+    if (S.w_lovers > 0 && S.m_lovers > 0 && Math.random() * 100 < S.w_lovers) {
+      const plain = ps.filter(q => q.job === 'tripulante');
+      if (plain.length >= 2) { const [a, b] = shuffle(plain); a.job = b.job = 'lovers'; a.lover = b.id; b.lover = a.id; this.pair = { a: a.id, b: b.id, unlocked: false, used: false, target: null }; }
+    }
     const mates = ps.filter(q => q.team !== 'inn' || true);
     for (const q of ps) if (q.job === 'execution') q.target = shuffle(mates.filter(o => o !== q && o.job !== 'joker'))[0]?.id ?? null; // nunca sorteia o Joker como alvo
   }
@@ -146,7 +152,7 @@ export class Room {
     ps.forEach((q, i) => {
       const a = (i / n) * Math.PI * 2;
       Object.assign(q, { alive: true, x: SPECIAL.spawn.x + Math.cos(a) * 85, y: SPECIAL.spawn.y + Math.sin(a) * 60, ix: 0, iy: 0, vent: -1, killCd: 10 + INTRO, emerg: 0, vote: null, voted: false, ts: {}, gone: false,
-        ghostJob: null, cd: q.job === 'xerife' || q.job === 'mentalista' || q.job === 'policial' ? { skill: 10 + INTRO } : {}, act: {}, uses: { panel: S.cie_uses, inf: S.inf_uses, tl: S.tl_uses, rj: S.rj_uses }, shieldT: 0, armor: q.job === 'samurai' ? S.sam_armor : 0, bank: 0, voteW: 1, inf: false, fuel: false, hasLighter: false, phT: 0, phLost: false, frzSel: [], carry: null, carryT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
+        ghostJob: null, cd: q.job === 'xerife' || q.job === 'mentalista' || q.job === 'policial' ? { skill: 10 + INTRO } : {}, act: {}, uses: { panel: S.cie_uses, inf: S.inf_uses, tl: S.tl_uses, rj: S.rj_uses, med: S.med_uses }, shieldT: 0, armor: q.job === 'samurai' ? S.sam_armor : 0, bank: 0, voteW: 1, inf: false, fuel: false, hasLighter: false, phT: 0, phLost: false, phTasks: [], frzSel: [], carry: null, carryT: 0, medRev: false, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
         killedBy: null, deathRoom: '', seen: new Set(), revealed: false, sciWait: false, watch: false,
         tasks: q.team === 'neu' ? [] : shuffle([...STATIONS]).slice(0, S.tasks).map(s => ({ id: s.id, type: s.type, name: s.name, room: s.room, done: false })) });
     });
@@ -155,9 +161,9 @@ export class Room {
     clearInterval(this.loop); this.loop = setInterval(() => this.tick(), 33);
   }
   startPayload(p) {
-    return { role: p.role, team: p.team, job: p.job, ghostJob: p.ghostJob, jp: p.revealed, target: p.target, sup: p.supLeft, x: p.x, y: p.y, alive: p.alive,
+    return { role: p.role, team: p.team, job: p.job, lover: p.lover, ghostJob: p.ghostJob, jp: p.revealed, target: p.target, sup: p.supLeft, x: p.x, y: p.y, alive: p.alive,
       mates: p.team === 'imp' ? this.list.filter(q => q.team === 'imp').map(q => [q.id, q.job]) : [],
-      tasks: p.tasks, settings: this.pubSettings(), players: this.list.map(q => ({ id: q.id, name: q.name, look: q.look })), emergUsed: p.emerg };
+      tasks: this.activeTasks(p), settings: this.pubSettings(), players: this.list.map(q => ({ id: q.id, name: q.name, look: q.look })), emergUsed: p.emerg };
   }
 
   // ---------- loop ----------
@@ -189,11 +195,11 @@ export class Room {
     if (p.probe) {
       const t = this.players.get(p.probe.id);
       if (!t || !t.alive || t.moving || dist(p, t) > PROBE_R || !p.alive) p.probe = null;
-      else if ((p.probe.t += dt) >= this.settings.men_inv) { this.send(p, { t: 'reveal', list: [[t.id, t.job]] }); p.probe = null; }
+      else if ((p.probe.t += dt) >= this.settings.men_inv) { this.send(p, { t: 'reveal', list: [[t.id, this.pubJob(t.job)]] }); p.probe = null; }
     }
   }
   bodyTick(dt) {
-    for (let i = this.bodies.length - 1; i >= 0; i--) { const b = this.bodies[i]; if (b.vanish > 0 && (b.vanish -= dt) <= 0) { this.bodies.splice(i, 1); continue; } if (b.hideT > 0) b.hideT -= dt; if (b.carry != null) { const c = this.players.get(b.carry); if (c && c.alive && c.carry === b.id) { b.x = c.x; b.y = c.y; } else b.carry = null; } }
+    for (let i = this.bodies.length - 1; i >= 0; i--) { const b = this.bodies[i]; if (b.vanish > 0 && (b.vanish -= dt) <= 0) { this.bodies.splice(i, 1); continue; } if (b.hideT > 0) b.hideT -= dt; if (b.carry != null) { const c = this.players.get(b.carry); if (c && c.alive && c.carry === b.id) { b.x = c.x; b.y = c.y; } else { b.carry = null; b.med = false; } } }
   }
   move(p, dt) {
     if (p.gone || p.vent >= 0 || p.watch) { if (p.watch) p.moving = false; return; }
@@ -216,7 +222,7 @@ export class Room {
   }
   eligible(except) { return this.list.filter(q => q !== except && q.alive && !q.gone); }
   bodyHidden(b) { return b.hideT > 0; }
-  drop(p) { const b = this.bodies.find(q => q.id === p.carry); if (b) { b.carry = null; b.x = p.x; b.y = p.y; b.hideT = 0; /* no chão o saco fica visível na hora */ } p.carry = null; }
+  drop(p) { const b = this.bodies.find(q => q.id === p.carry); if (b) { b.carry = null; b.med = false; b.x = p.x; b.y = p.y; b.hideT = 0; /* no chão o saco fica visível na hora */ } p.carry = null; }
   histTick() {
     if (this.n % 15 !== 0) return; // ~2 amostras por segundo
     this.hist.push({ t: this.clockT, pl: this.list.filter(q => !q.gone).map(q => [q.id, q.x, q.y, q.alive ? 1 : 0, q.vent]) });
@@ -231,21 +237,29 @@ export class Room {
     for (const [id, x, y, al] of e.pl) {
       const q = this.players.get(id); if (!q || q.gone) continue;
       if (al && !q.alive) { // ressuscita
-        q.alive = true; q.killedBy = null; if (q.ghostJob) { this.ghostN[q.ghostJob] = Math.max(0, (this.ghostN[q.ghostJob] || 1) - 1); q.ghostJob = null; } q.cd = {}; q.act = {}; rev.push(id);
+        this.resurrect(q); rev.push(id);
       }
       if (q.alive) { q.vent = -1; q.x = x; q.y = y; q.ix = q.iy = 0; if (q.morph) q.morph = null; if (q.carry != null) this.drop(q); ps.push([id, x | 0, y | 0]); }
     }
     this.bodies = this.bodies.filter(b => !rev.includes(b.id));
     p.uses.tl--; p.cd.rewind = S.tl_cd; this.hist = []; this.histMin = this.clockT;
-    this.all({ t: 'rewind', ps, rev, by: p.id });
+    this.all({ t: 'rewind', ps, rev }); // sem nome do usuário: ninguém sabe quem retrocedeu
     for (const id of rev) this.send(this.players.get(id), { t: 'revive' });
     console.log(`[retrocesso] ${this.code} ${p.name} voltou ${Math.round(this.clockT - e.t)}s; ressuscitados: ${rev.length}`);
   }
-  givePhantomTasks(v) { // o Phantom ganha tarefas próprias (não contam para a vitória dos inocentes) e vence ao concluir todas
-    v.tasks = shuffle([...STATIONS]).slice(0, this.settings.ph_tasks).map(s => ({ id: s.id, type: s.type, name: s.name, room: s.room, done: false })); v.ts = {};
-    this.send(v, { t: 'tasks', list: v.tasks });
+  // v1.5: volta à vida mantendo profissão/equipe (usado pelo Time Lord e pelo Médico). Não mexe em posição nem em corpos.
+  resurrect(q) {
+    q.alive = true; q.killedBy = null; q.vent = -1; q.ix = q.iy = 0; q.watch = false; q.cd = {}; q.act = {}; q.shieldT = 0;
+    if (q.ghostJob) { this.ghostN[q.ghostJob] = Math.max(0, (this.ghostN[q.ghostJob] || 1) - 1); if (q.ghostJob === 'phantom') { q.phTasks = []; this.send(q, { t: 'tasks', list: q.tasks }); } q.ghostJob = null; }
+    if (q.team === 'imp') q.killCd = Math.max(q.killCd, 12);
   }
-  phantomDone(p) { return p.ghostJob === 'phantom' && !p.phLost && p.tasks.length > 0 && p.tasks.filter(k => !this.taskFrozen(k)).every(k => k.done); }
+  activeTasks(p) { return p.ghostJob === 'phantom' && !p.phLost ? p.phTasks : p.tasks; } // lista que o jogador está fazendo agora
+  givePhantomTasks(v) { // 12 tarefas próprias (não contam para os inocentes). As tarefas originais continuam guardadas e as já concluídas seguem contando para a equipe
+    const mine = new Set(v.tasks.map(k => k.id));
+    v.phTasks = shuffle(STATIONS.filter(s => !mine.has(s.id))).slice(0, this.settings.ph_tasks).map(s => ({ id: s.id, type: s.type, name: s.name, room: s.room, done: false })); v.ts = {};
+    this.send(v, { t: 'tasks', list: v.phTasks });
+  }
+  phantomDone(p) { return p.ghostJob === 'phantom' && !p.phLost && p.phTasks.length > 0 && p.phTasks.filter(k => !this.taskFrozen(k)).every(k => k.done); }
   phVisible(p) { const S = this.settings, cyc = S.ph_hid + S.ph_vis; return p.ghostJob === 'phantom' && !p.alive && !p.phLost && (p.phT % cyc) >= S.ph_hid; }
   paProgress(pa) { const el = this.eligible(pa); return [el.filter(q => q.fuel).length, el.length]; }
   viProgress(vi) { const el = this.eligible(vi); return [el.filter(q => q.inf).length, el.length]; }
@@ -267,7 +281,7 @@ export class Room {
   }
   taskCount() {
     let d = 0, t = 0;
-    for (const p of this.list) if (p.team === 'inn' && !p.gone && p.ghostJob !== 'phantom') for (const k of p.tasks) { if (this.taskFrozen(k)) continue; t++; if (k.done) d++; }
+    for (const p of this.list) if (p.team === 'inn' && !p.gone) { const ph = p.ghostJob === 'phantom' && !p.phLost; for (const k of p.tasks) { if (ph && !k.done) continue; /* Phantom: só as já concluídas continuam contando */ if (this.taskFrozen(k)) continue; t++; if (k.done) d++; } }
     return [d, t];
   }
   snapshot() {
@@ -286,7 +300,7 @@ export class Room {
         if (v.alive && !(v.act.zoom > 0) && dist(v, p) > R) continue; // com ZOOM (Policial/Red John) vê todos os jogadores andando
         pl.push([p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.alive ? 0 : phv && v.alive ? 2 : 1, p.morph || p.id, inv ? 1 : 0]);
       }
-      for (const b of this.bodies) if ((!v.alive || v.act.zoom > 0 || dist(v, b) <= R) && (!this.bodyHidden(b) || !v.alive)) bd.push([b.id, b.x | 0, b.y | 0, b.g ? 1 : 0, b.fx || 0, b.bag ? (this.bodyHidden(b) ? 2 : 1) : 0]);
+      for (const b of this.bodies) if ((!v.alive || v.act.zoom > 0 || dist(v, b) <= R) && (!this.bodyHidden(b) || !v.alive)) bd.push([b.id, b.x | 0, b.y | 0, b.g ? 1 : 0, b.fx || 0, b.bag ? (this.bodyHidden(b) ? 2 : 1) : 0, b.med ? 1 : 0]);
       let cams = null, vd = null;
       if (v.watch) cams = CAMS.map(c => { const o = { x: c.vx, y: c.vy }; return [this.list.filter(p => p.alive && !p.gone && p.vent < 0 && !(p.act.invis > 0) && !(p.act.samrush > 0) && dist(p, o) <= CAM_R).map(p => [p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.morph || p.id]), this.bodies.filter(b => dist(b, o) <= CAM_R && !this.bodyHidden(b)).map(b => [b.id, b.x | 0, b.y | 0, b.g ? 1 : 0])]; });
       if (v.vent >= 0 && v.alive) vd = this.list.filter(p => p !== v && p.alive && !p.gone && dist(p, v) <= 1600).map(p => +Math.atan2(p.y - v.y, p.x - v.x).toFixed(2));
@@ -303,7 +317,11 @@ export class Room {
     if (J === 'congelador') x.sel = v.frzSel;
     if (J === 'parinomo') { x.pf = this.paProgress(v); x.pids = this.eligible(v).filter(q => q.fuel).map(q => q.id); x.hl = v.hasLighter ? 1 : 0; x.ls = this.lighter ? 1 : 0; }
     if (J === 'virus') { x.vi = this.viProgress(v); x.vids = this.eligible(v).filter(q => q.inf).map(q => q.id); }
-    if (J === 'dexter') x.carry = v.carry != null ? Math.ceil(v.carryT) : 0;
+    if (J === 'dexter' || J === 'medico') x.carry = v.carry != null ? Math.ceil(v.carryT) : 0;
+    if (v.alive && v.job === 'lovers' && this.pair) { // privado: só os dois Lovers recebem
+      const o = this.players.get(v.lover), cnt = q => [q.tasks.filter(k => k.done).length, q.tasks.length];
+      x.lv = [v.lover, ...cnt(v), ...(o ? cnt(o) : [0, 0]), this.pair.unlocked ? 1 : 0, this.pair.used ? 1 : 0, this.pair.target ?? -1];
+    }
     if (J === 'advogado') x.bank = v.bank;
     if (!v.alive && v.ghostJob === 'phantom') { const S = this.settings, cyc = S.ph_hid + S.ph_vis, t = v.phT % cyc, vis = t >= S.ph_hid; x.ph = [vis ? 1 : 0, Math.ceil(vis ? cyc - t : S.ph_hid - t), v.phLost ? 1 : 0]; }
     return Object.keys(x).length ? x : 0;
@@ -330,9 +348,9 @@ export class Room {
       case 'start': this.start(p); break;
       case 'ping': this.send(p, { t: 'pong', ts: m.ts }); break;
       case 'input': if (ph === 'play') { p.inAt = Date.now(); p.ix = Math.max(-1, Math.min(1, +m.x || 0)); p.iy = Math.max(-1, Math.min(1, +m.y || 0)); } break;
-      case 'taskStart': { if (ph !== 'play') break; const k = p.tasks.find(t => t.id === m.id && !t.done), s = stationById[m.id];
+      case 'taskStart': { if (ph !== 'play') break; const k = this.activeTasks(p).find(t => t.id === m.id && !t.done), s = stationById[m.id];
         if (k && s && !this.taskFrozen(k) && dist(p, s) <= TASK_R) p.ts[m.id] = Date.now(); break; }
-      case 'taskDone': { if (ph !== 'play') break; const k = p.tasks.find(t => t.id === m.id && !t.done), s = stationById[m.id], t0 = p.ts[m.id];
+      case 'taskDone': { if (ph !== 'play') break; const k = this.activeTasks(p).find(t => t.id === m.id && !t.done), s = stationById[m.id], t0 = p.ts[m.id];
         if (!k || !s || !t0 || this.taskFrozen(k) || dist(p, s) > TASK_R + 30 || Date.now() - t0 < TASK_MIN[k.type]) break;
         k.done = true; delete p.ts[m.id]; this.send(p, { t: 'taskOk', id: m.id }); this.taskHooks(p); this.checkWin(); break; }
       case 'kill': this.kill(p); break;
@@ -361,9 +379,19 @@ export class Room {
     if (this.phantomDone(p)) return this.end('phantom', `${p.name} (Phantom) concluiu todas as tarefas e venceu sozinho!`, p.id);
     if (!p.supGiven && (p.job === 'juiz' || p.job === 'mentalista')) { p.supGiven = true; p.supLeft = this.settings.jui_uses; this.send(p, { t: 'sup', left: p.supLeft, fresh: true }); }
     if (p.job === 'mentalista' && !p.revealed && p.tasks.every(k => k.done)) { p.revealed = true; this.send(p, { t: 'unlock' }); }
+    this.checkLovers();
   }
+  // Lovers: só libera a descoberta quando OS DOIS terminaram (tarefas em áreas congeladas não bloqueiam)
+  checkLovers() {
+    const pr = this.pair; if (!pr || pr.unlocked) return;
+    const a = this.players.get(pr.a), b = this.players.get(pr.b); if (!a || !b || a.gone || b.gone) return;
+    const done = q => q.tasks.every(k => k.done || this.taskFrozen(k));
+    if (!done(a) || !done(b)) return;
+    pr.unlocked = true; for (const q of [a, b]) this.send(q, { t: 'lovunlock' });
+  }
+  pubJob(j) { return j === 'lovers' ? 'tripulante' : j; } // habilidades de investigação nunca expõem os Lovers
   // Morte unificada (kill, tiro, voto). force ignora escudo.
-  slay(v, killer, { body = true, force = false } = {}) {
+  slay(v, killer, { body = true, force = false, link = false } = {}) {
     if (!v.alive) return false;
     if (!force && v.shieldT > 0) { if (killer) this.send(killer, { t: 'err', msg: 'Um escudo protegeu o alvo!' }); return false; }
     if (!force && killer && v.armor > 0) { v.armor--; this.send(v, { t: 'err', msg: 'Sua armadura bloqueou o ataque!' }); this.send(killer, { t: 'err', msg: 'O alvo estava protegido por uma armadura!' }); return false; }
@@ -377,8 +405,8 @@ export class Room {
       this.bodies.push({ id: v.id, x: v.x, y: v.y, killer: killer?.id ?? null, arrow: v.job === 'barulhento', g: vib, vanish: vib ? this.settings.vib_van : 0, fx: killer?.job === 'redjohn' ? 1 : killer?.job === 'samurai' ? 2 : 0, hideT: 0, bag: false, carry: null });
       this.all({ t: 'fx', k: vib ? 'killg' : 'kill', id: v.id, x: v.x | 0, y: v.y | 0 }, q => !q.alive || dist(q, v) <= this.visR(q) * 1.3);
     }
-    if (body) this.send(v, { t: 'kanim', k: kap, v: vap, r: 'victim' }); // a cena aparece só para quem morre
-    this.send(v, { t: 'died', by: killer ? 'kill' : 'vote' });
+    if (body && !link) this.send(v, { t: 'kanim', k: kap, v: vap, r: 'victim' }); // a cena aparece só para quem morre
+    this.send(v, { t: 'died', by: link ? 'link' : killer ? 'kill' : 'vote' });
     // alvo do Execution morreu por outros meios
     for (const q of this.list) if (q.job === 'execution' && q.target === v.id && q.alive && killer) { q.target = null; this.send(q, { t: 'err', msg: 'Seu alvo morreu. Você agora joga pela sobrevivência.' }); }
     // profissões de fantasma (só inocentes que morrem)
@@ -386,6 +414,11 @@ export class Room {
       if ((this.ghostN[gj] || 0) < this.settings['m_' + gj] && Math.random() * 100 < this.settings['w_' + gj]) {
         this.ghostN[gj] = (this.ghostN[gj] || 0) + 1; v.ghostJob = gj; v.cd = {}; v.uses.inf = this.settings.inf_uses; v.phT = 0; v.phLost = false; this.send(v, { t: 'ghost', job: gj }); if (gj === 'phantom') this.givePhantomTasks(v); break;
       }
+    }
+    // v1.5 Lovers: a morte de um leva o outro. O parceiro entra com link:true, então não há cascata (o primeiro já está morto) nem evento duplicado.
+    if (v.job === 'lovers' && v.lover != null && !link) {
+      const q = this.players.get(v.lover);
+      if (q && q.alive && !q.gone) { console.log(`[morte-lovers] ${this.code} ${q.name} morreu junto com ${v.name}`); this.slay(q, null, { body, force: true, link: true }); this.send(q, { t: 'hint', text: 'Seu par dos Lovers morreu e a ligação levou você junto.' }); }
     }
     return true;
   }
@@ -461,7 +494,7 @@ export class Room {
       }
       case 'jobpanel': {
         if (J !== 'mentalista' || !p.revealed || (ph !== 'meet' && ph !== 'vote')) return;
-        this.send(p, { t: 'jobpanel', list: this.list.filter(q => !q.gone).map(q => [q.id, q.job, q.alive ? 1 : 0]) }); break;
+        this.send(p, { t: 'jobpanel', list: this.list.filter(q => !q.gone).map(q => [q.id, this.pubJob(q.job), q.alive ? 1 : 0]) }); break;
       }
       case 'probe': {
         if (J !== 'mentalista' || !play || !p.alive || p.probe || p.cd.probe > 0) return;
@@ -495,7 +528,7 @@ export class Room {
         if (J !== 'redjohn' || !play || !p.alive || p.vent >= 0 || p.cd.rjinv > 0) return;
         if (!(p.uses.rj > 0)) return bad('Sem investigações nesta rodada.');
         const t = this.nearestVictim(p, () => true); if (!t) return bad('Aproxime-se de alguém para investigar.');
-        p.uses.rj--; p.cd.rjinv = S.rj_cd; this.send(p, { t: 'reveal', list: [[t.id, t.job]] }); break;
+        p.uses.rj--; p.cd.rjinv = S.rj_cd; this.send(p, { t: 'reveal', list: [[t.id, this.pubJob(t.job)]] }); break;
       }
       case 'phase':
         if (J !== 'ghostinc' || !play || !p.alive || p.vent >= 0 || p.act.phase > 0 || p.cd.phase > 0) return; p.act.phase = S.gh_dur; break;
@@ -542,19 +575,65 @@ export class Room {
       case 'phclick': {
         if (!play || !p.alive) return; const ph2 = this.players.get(+m.to);
         if (!ph2 || !this.phVisible(ph2) || Math.hypot(p.x - ph2.x, p.y - ph2.y) > PH_R) return;
-        ph2.phLost = true; ph2.ghostJob = null; ph2.tasks = []; this.send(ph2, { t: 'tasks', list: [] }); this.ghostN.phantom = Math.max(0, (this.ghostN.phantom || 1) - 1);
+        ph2.phLost = true; ph2.ghostJob = null; ph2.phTasks = []; this.send(ph2, { t: 'tasks', list: ph2.tasks }); /* volta às tarefas de inocente */ this.ghostN.phantom = Math.max(0, (this.ghostN.phantom || 1) - 1);
         this.send(ph2, { t: 'phlost' }); this.send(p, { t: 'hint', text: 'Você descobriu o Phantom! Ele perdeu a profissão.' }); break;
       }
       case 'bag': {
         if (J !== 'dexter' || !play || !p.alive || p.vent >= 0 || p.carry != null || p.cd.bag > 0) return;
-        const b = this.bodies.find(q => !q.bag && dist(p, q) <= REPORT_R); if (!b) return bad('Chegue perto de um corpo.');
+        const b = this.bodies.find(q => !q.bag && q.carry == null && dist(p, q) <= REPORT_R); if (!b) return bad('Chegue perto de um corpo.');
         b.bag = true; b.carry = p.id; b.hideT = S.dex_hide; p.carry = b.id; p.carryT = S.dex_carry; p.cd.bag = S.dex_cd; b.x = p.x; b.y = p.y; break;
       }
       case 'drop': if (J !== 'dexter' || !play || p.carry == null) return; this.drop(p); break;
+      case 'mcarry': { // Médico pega o corpo mais próximo (um corpo só pode ter um carregador)
+        if (J !== 'medico' || !play || !p.alive || p.vent >= 0 || p.carry != null) return;
+        let b = null, bd = REPORT_R; for (const q of this.bodies) if (!q.bag && q.carry == null && dist(p, q) <= bd) { b = q; bd = dist(p, q); }
+        if (!b) return bad('Chegue perto de um corpo.');
+        b.carry = p.id; b.med = true; p.carry = b.id; p.carryT = S.med_carry; b.x = p.x; b.y = p.y; break;
+      }
+      case 'mdrop': if (J !== 'medico' || !play || p.carry == null) return; this.drop(p); break;
+      case 'revive': if (J !== 'medico' || !play || !p.alive || p.vent >= 0) return; this.medRevive(p, bad); break;
+      case 'lovfind': {
+        if (J !== 'lovers' || !p.alive || ph === 'lobby' || ph === 'end') return; const pr = this.pair;
+        if (!pr || !pr.unlocked) return bad('Ainda bloqueado: os dois Lovers precisam concluir as tarefas.');
+        if (pr.used) { this.send(p, { t: 'lovfound', id: pr.target }); return; } // só um impostor por par: repete o mesmo resultado
+        const imps = this.list.filter(q => q.alive && !q.gone && q.team === 'imp'); // estado ATUAL: nunca um impostor morto
+        if (!imps.length) return bad('Não há nenhum impostor vivo para revelar.');
+        const t = imps[rnd(imps.length)]; pr.used = true; pr.target = t.id;
+        for (const id of [pr.a, pr.b]) { const l = this.players.get(id); if (l) this.send(l, { t: 'lovfound', id: t.id }); } break;
+      }
       case 'invis':
         if (J !== 'espectro' || !play || !p.alive) return;
         if (p.act.invis > 0) { delete p.act.invis; p.cd.invis = S.esp_cd; } else if (!(p.cd.invis > 0)) p.act.invis = S.esp_dur; break;
     }
+  }
+
+  // v1.5 Médico: ressuscita na Enfermaria, com corpo válido. Servidor valida tudo; mesma profissão/equipe; no máximo uma vez por jogador.
+  medRevive(p, bad) {
+    const S = this.settings;
+    if (p.cd.revive > 0) return bad(`Aguarde ${Math.ceil(p.cd.revive)}s para ressuscitar de novo.`);
+    if (!(p.uses.med > 0)) return bad('Você não tem mais ressuscitações.');
+    if (roomAt(p.x, p.y)?.id !== 'enfermaria' || this.frozenHit(p.x, p.y)) return bad('A ressuscitação só funciona dentro da Enfermaria.');
+    let b = null, bd = REPORT_R; for (const q of this.bodies) if (!q.bag && (q.carry == null || q.carry === p.id) && dist(p, q) <= bd) { b = q; bd = dist(p, q); }
+    if (!b) return bad('Fique perto de um corpo dentro da Enfermaria.');
+    if (roomAt(b.x, b.y)?.id !== 'enfermaria') return bad('O corpo precisa estar dentro da Enfermaria.');
+    const v = this.players.get(b.id);
+    if (!v || v.alive || v.gone) return bad('Esse corpo não é válido.');
+    if (v.medRev) return bad('Esse jogador já foi ressuscitado uma vez.');
+    const group = [[v, b]];
+    if (v.job === 'lovers' && v.lover != null) { // o par precisa voltar junto; se o parceiro não tem corpo válido, ninguém volta
+      const o = this.players.get(v.lover);
+      if (o && !o.alive) { const ob = this.bodies.find(x => x.id === o.id && !x.bag); if (!ob || o.gone || o.medRev) return bad('O parceiro dos Lovers não tem um corpo válido; a ligação impede a ressuscitação.'); group.push([o, ob]); }
+    }
+    for (const [q, qb] of group) {
+      this.bodies = this.bodies.filter(x => x !== qb); if (p.carry === qb.id) p.carry = null;
+      this.resurrect(q); q.medRev = true;
+      if (q === v) { q.x = b.x; q.y = b.y; } else { q.x = p.x + 34; q.y = p.y; this.unstick(q); }
+      this.send(q, { t: 'revive' });
+      this.all({ t: 'rvfx', id: q.id, x: q.x | 0, y: q.y | 0 }, w => !w.alive || dist(w, q) <= this.visR(w) * 1.3);
+    }
+    p.uses.med--; p.cd.revive = S.med_cd;
+    console.log(`[ressuscitou] ${this.code} ${p.name} (Médico) trouxe de volta ${group.map(([q]) => q.name + ' (' + q.job + ')').join(' + ')}`);
+    this.checkWin();
   }
 
   // ---------- reuniões ----------
@@ -619,6 +698,7 @@ export class Room {
     const cg = this.list.filter(p => p.job === 'congelador' && p.alive && !p.gone && p.frzSel.length);
     for (const p of cg) { for (const id of p.frzSel) this.frozen.add(id); const n = p.frzSel.length; p.frzSel = []; this.send(p, { t: 'hint', text: `${n} área(s) congelada(s). Total: ${this.frozen.size}/${this.settings.frz_win}.` }); }
     for (const q of this.list) if (this.phantomDone(q)) { this.end('phantom', `${q.name} (Phantom) concluiu todas as tarefas e venceu sozinho!`, q.id); return; }
+    this.checkLovers();
     if (cg.length) { this.all({ t: 'frozen', list: [...this.frozen] }); if (this.frozen.size >= this.settings.frz_win) { const p = cg[0]; this.end('congelador', `${p.name} (Congelador) congelou a estação inteira!`, p.id); } }
   }
   // ---------- fim ----------
@@ -637,9 +717,9 @@ export class Room {
   }
   toLobby() {
     clearInterval(this.loop); this.loop = null;
-    for (const p of [...this.players.values()]) { if (!p.ws || p.gone) this.players.delete(p.id); else Object.assign(p, { role: null, team: null, job: null, ghostJob: null, alive: true, tasks: [], vent: -1, act: {}, cd: {}, morph: null, armor: 0, bank: 0, inf: false, fuel: false, hasLighter: false, carry: null, frzSel: [] }); }
+    for (const p of [...this.players.values()]) { if (!p.ws || p.gone) this.players.delete(p.id); else Object.assign(p, { role: null, team: null, job: null, ghostJob: null, alive: true, tasks: [], phTasks: [], vent: -1, act: {}, cd: {}, morph: null, armor: 0, bank: 0, inf: false, fuel: false, hasLighter: false, carry: null, frzSel: [], lover: null, medRev: false }); }
     if (!this.players.has(this.hostId)) this.hostId = this.humansList()[0]?.id ?? null;
-    Object.assign(this, { phase: 'lobby', bodies: [], sab: null, meet: null, frozen: new Set(), lighter: null, hist: [] });
+    Object.assign(this, { phase: 'lobby', bodies: [], sab: null, meet: null, frozen: new Set(), lighter: null, hist: [], pair: null });
     if (this.humansList().length) { this.syncBots(); this.lobby(); } else this.destroy();
   }
 }

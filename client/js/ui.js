@@ -4,7 +4,7 @@ import { COLORS, COLOR_NAMES, HATS, OUTFITS, ACCS, MASCOTS, SKINS } from '/share
 export const TAKEN = new Set(); // cores ocupadas por outros jogadores (atualizado pelo lobby)
 const UI_TOAST = m => toast(m);
 import { sfx, setVol, A } from './audio.js';
-import { JOBS, JOB, PARAMS, BOT_PARAMS, TEAMS, SETTING_LIMITS } from '/shared/jobs.js';
+import { JOBS, JOB, PARAMS, BOT_PARAMS, TEAMS, SETTING_LIMITS, paintJob } from '/shared/jobs.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
@@ -147,7 +147,7 @@ export function renderJobs(L, myId, send) {
     return;
   }
   for (const j of JOBS.filter(x => x.team === jtab)) {
-    const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); nm.style.color = j.color === '#111419' ? '#e9f1ff' : j.color;
+    const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); paintJob(nm, j);
     row.append(nm, el('small', null, j.desc + (j.ghost ? ' (só recebida após morrer)' : '')), slider(j.ghost ? 'Chance ao morrer' : 'Chance de aparecer', 'w_' + j.id, 0, 100, 5, v => v + '%'));
     if (j.id !== 'tripulante') row.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v)); body.append(row);
   }
@@ -177,7 +177,7 @@ const WIN = { crew: ['EQUIPE VENCEU', '#2de2c5', 'rgba(20,90,80,.8)'], imp: ['IM
 export function showEnd(m, roster, me) {
   const [title, col, bg] = WIN[m.winner] || WIN.crew, t = $('eTitle'); t.textContent = title; t.style.color = col; t.style.textShadow = `0 0 40px ${col}`;
   $('eReason').textContent = m.reason; const l = $('eList'); l.innerHTML = '';
-  for (const [id, role, alive, job] of m.roles) { const p = roster.get(id), J = JOB[job], d = el('div', role === 'imp' ? 'imp' : '', `${p?.name || '?'} · `); const s = el('b', null, J?.name || '?'); s.style.color = J?.color === '#111419' ? '#e9f1ff' : J?.color; d.append(s, document.createTextNode(alive ? '' : ' ☠')); l.append(d); }
+  for (const [id, role, alive, job] of m.roles) { const p = roster.get(id), J = JOB[job], d = el('div', role === 'imp' ? 'imp' : '', `${p?.name || '?'} · `); const s = el('b', null, J?.name || '?'); paintJob(s, J); d.append(s, document.createTextNode(alive ? '' : ' ☠')); l.append(d); }
   $('end').style.background = `radial-gradient(circle,${bg},rgba(4,8,18,.96))`; show('end');
   const won = m.winner === 'crew' ? me.team !== 'imp' && !['joker', 'execution'].includes(me.job) : m.winner === 'imp' ? me.team === 'imp' : m.winner === 'joker' ? me.job === 'joker' : me.job === 'execution';
   sfx(won ? 'win' : 'lose');

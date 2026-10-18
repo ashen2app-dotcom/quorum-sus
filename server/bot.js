@@ -3,6 +3,7 @@
 // Nunca lê o estado de outros jogadores no servidor: tudo o que "sabe" vem de percepção, habilidades ou chat.
 import { STATIONS, SPECIAL, VENTS, ROOMS, TASK_MIN, FREEZABLE, ROOM_BY_ID, roomAt } from '../shared/map.js';
 import { JOB, JOBS, colorTone } from '../shared/jobs.js';
+import { COLOR_NAMES } from '../shared/cosmetics.js';
 import { findPath } from './nav.js';
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -18,6 +19,12 @@ const PREP = { 'Sala Central': 'na', 'Refeitório': 'no', 'Sala de Controle': 'n
 const inR = n => (n === 'um corredor' ? 'num corredor' : `${PREP[n] || 'na'} ${n}`);
 const via = n => (n === 'um corredor' ? 'por um corredor' : `${({ no: 'pelo', na: 'pela', nas: 'pelas', nos: 'pelos' })[PREP[n] || 'na']} ${n}`);
 const JOB_BY_NAME = Object.fromEntries(JOBS.map(j => [j.name.toLowerCase(), j]));
+const norm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+// apelidos aceitos no chat (já sem acento): "time lord", "timelord", "ghost inc"...
+const JOB_ALIAS = { 'time lord': 'timelord', timelord: 'timelord', 'ghost inc': 'ghostinc', ghostinc: 'ghostinc', fantasma: 'ghostinc', 'red john': 'redjohn', redjohn: 'redjohn', doutor: 'medico', medica: 'medico', medico: 'medico', lover: 'lovers', lovers: 'lovers', casal: 'lovers', vibora: 'vibora', virus: 'virus', policia: 'policial', cop: 'policial', sheriff: 'xerife' };
+const CLAIM_JOBS = JOBS.filter(j => j.team !== 'imp').map(j => [norm(j.name), j.id]).concat(Object.entries(JOB_ALIAS)).sort((a, b) => b[0].length - a[0].length);
+const CLAIM_RE = new RegExp('\\b(?:eu\\s+)?(?:sou|era|to de|tô de|minha (?:profissao|funcao|classe) e)\\s+(?:o\\s+|a\\s+|um\\s+|uma\\s+|do\\s+|da\\s+)?(' + CLAIM_JOBS.map(x => x[0].replace(/ /g, '\\s+')).join('|') + ')\\b');
+const cname = i => (COLOR_NAMES[i] || '').toLowerCase();
 
 export class Bot {
   constructor(room, p) {
@@ -26,7 +33,8 @@ export class Bot {
       ab: { cd: {}, act: {}, us: {}, sup: 0 }, sab: null, cdKill: 99, sabCd: 99, vr: 420, tk: [0, 1], loc: null, goal: null, path: null, pi: 0, repath: 0, pause: 0, work: null, lastIn: '', stuckT: 0, stuckP: { x: p.x, y: p.y },
       phase: 'play', mtg: null, mtgAlive: new Set(), chatQ: [], voted: false, voteAt: 0, supLeft: 0, jp: false, lastKillAt: -99, meetEnd: 0, abT: 0, danger: null, ventUntil: 0, watching: false, watchUntil: 0,
       lastRoom: '', ended: false, nextPanel: 40, camLed: 0, accusedBy: new Set(), pendKill: null, panelDone: false, deathBy: null, killerJob: null, mtgStart: 0, lastGoalPick: 0, gameT0: 0, usedEmerg: 0, ghostT: 0, comp: new Map(), replies: 0, lastReplyAt: -99, said: new Set(), claims: new Map(), heatBy: new Map(), pushes: new Map(), roomClaim: new Map(), jokerSus: new Map(), execSus: new Map(), liars: new Set(), trusted: new Set(), lastSend: -99 });
-    Object.assign(this, { xt: {}, fz: [], bank: 0, lastRewindAt: -99 });
+    Object.assign(this, { xt: {}, fz: [], bank: 0, lastRewindAt: -99,
+      lover: null, killerAp: null, revInfo: null, tlKnown: false, medKnown: false, guess: new Map(), skipPush: new Map(), votePush: new Map(), badGoal: new Map(), fact: new Set(), revSeen: new Set(), ec: 0, stuckN: 0, wiggle: 0, medPlan: null, bodySeenFx: new Map(), revealedLover: null });
     this.trait = { chatty: rnd(0.7, 1.3), brave: rnd(0.6, 1.4), curious: rnd(0.6, 1.4) };
   }
   c(k) { return this.room.settings[k]; }
@@ -45,7 +53,7 @@ export class Bot {
       case 'snap': this.onSnap(m); break;
       case 'taskOk': { const t = this.tasks.find(x => x.id === m.id); if (t) t.done = true; break; }
       case 'fx': this.onKillFx(m); break;
-      case 'died': this.deathBy = m.by; break;
+      case 'died': this.deathBy = m.by; this.deathRoom = this.lastRoom; break;
       case 'ghost': this.ghostJob = m.job; break;
       case 'meeting': this.onMeeting(m); break;
       case 'phase': if (m.p === 'vote') { this.phase = 'vote'; this.voteDur = m.time; this.voteAt = this.clock + Math.min(m.time - 2.5, rnd(0.12, 0.65) * m.time * (0.6 + this.c('bot_react') / 3)); } break;
@@ -62,36 +70,45 @@ export class Bot {
       case 'camOff': this.watching = false; break;
       case 'tasks': this.tasks = m.list.map(t => ({ ...t })); break;
       case 'bank': this.bank = m.n; break;
-      case 'rewind': this.path = null; this.goal = null; this.pause = 0.6; break;
+      case 'rewind': this.onRewind(m); break;
+      case 'rvfx': this.onReviveSeen(m.id, true); break;
+      case 'revive': this.onRevived(); break;
+      case 'kanim': this.killerAp = m.k; break;
+      case 'lovfound': this.onLovFound(m.id); break;
+      case 'lovunlock': this.lovReady = true; break;
       case 'phlost': this.ghostJob = null; break;
       case 'frozen': this.fz = m.list || []; this.path = null; break;
       case 'end': this.ended = true; break;
     }
   }
   init(m) {
-    this.job = m.job; this.team = m.team; this.ghostJob = m.ghostJob; this.target = m.target; this.supLeft = m.sup || 0; this.jp = !!m.jp;
+    this.job = m.job; this.team = m.team; this.ghostJob = m.ghostJob; this.target = m.target; this.supLeft = m.sup || 0; this.jp = !!m.jp; this.lover = m.lover ?? null;
     this.mates = new Set(m.mates.map(x => x[0])); for (const [id, j] of m.mates) this.known.set(id, j);
     this.roster = new Map(m.players.map(q => [q.id, q])); this.tasks = m.tasks.map(t => ({ ...t })); this.pos = { x: m.x, y: m.y }; this.gameT0 = this.clock;
   }
   sus(id, d, why) {
-    if (id === this.p.id || this.mates.has(id) || this.deadKnown.has(id) || !this.roster.has(id)) return;
+    if (id === this.p.id || id === this.lover || this.mates.has(id) || this.deadKnown.has(id) || !this.roster.has(id)) return;
     const v = clamp((this.susp.get(id) ?? 20) + d * (0.45 + this.pc('bot_sus')), 0, 100); this.susp.set(id, v); if (why && d > 0) this.why.set(id, why);
   }
   onSnap(m) {
-    const me = this.p; this.pos = { x: m.you[0], y: m.you[1] }; this.sab = m.sab; this.tk = m.tk; this.ab = m.ab; this.vr = m.vr == null ? 3000 : m.vr; this.loc = m.loc; this.intro = m.intro;
+    const me = this.p; this.pos = { x: m.you[0], y: m.you[1] }; this.sab = m.sab; this.ec = m.ec | 0; this.tk = m.tk; this.ab = m.ab; this.vr = m.vr == null ? 3000 : m.vr; this.loc = m.loc; this.intro = m.intro;
     if (m.cd) { this.cdKill = m.cd[0]; this.sabCd = m.cd[1]; } this.lastRoom = roomName(this.pos.x, this.pos.y);
     const cur = new Map(); for (const [id, x, y, face, mv, gh, ap, inv] of m.pl) cur.set(id, { id, x, y, mv: !!mv, ghost: !!gh, ph: gh === 2, ap, inv: !!inv });
     this.xt = m.xt || {}; this.fz = m.fz || [];
     const look = Math.min(this.vr, 420);
     if (me.alive && me.vent < 0 && !this.watching) {
-      for (const [id, o] of this.prevVis) if (!cur.has(id) && !o.ghost && dist(o, this.pos) < look * 0.75) { if (VENTS.some(v => dist(v, o) < 70)) this.sus(id, 45, 'vent'); else if (roll(0.7)) this.sus(id, 14, 'sumiu'); }
+      for (const [id, o] of this.prevVis) if (!cur.has(id) && !o.ghost && dist(o, this.pos) < look * 0.75) { if (VENTS.some(v => dist(v, o) < 70)) this.sus(id, 45, 'vent'); else if (roll(0.7)) { this.sus(id, 14, 'sumiu'); if (!(this.sab?.k === 'lights')) this.deduce(id, 'espectro', 0.45); } }
       const aps = new Map(); for (const o of cur.values()) { const k = o.ap ?? o.id; if (aps.has(k)) { this.sus(o.id, 12, 'duplo'); this.sus(aps.get(k), 12, 'duplo'); } aps.set(k, o.id); }
-      for (const [id, o] of cur) { const pv = this.prevVis.get(id); if (pv && pv.ap !== o.ap && dist(o, this.pos) < 380) this.sus(id, 40, 'transformou'); }
+      for (const [id, o] of cur) { const pv = this.prevVis.get(id); if (pv && pv.ap !== o.ap && dist(o, this.pos) < 380) { this.sus(id, 40, 'transformou'); this.deduce(id, 'metamorfo', 0.95, { from: pv.ap, to: o.ap }); } }
     }
     this.vis = cur; this.prevVis = cur; for (const [id, o] of cur) this.seen.set(id, { x: o.x, y: o.y, t: this.clock });
     { const arr = [...cur.values()].filter(o => !o.ghost); for (const a of arr) for (const b of arr) if (a !== b && dist(a, b) < 220) this.comp.set(b.id, { id: a.id, t: this.clock }); } // quem estava com quem
     const seenB = new Set();
-    for (const [id, x, y, g] of m.bd) { seenB.add(id); const b = this.bodies.get(id); if (!b) this.onBody(id, x, y); else { b.t = this.clock; b.remote = false; } }
+    for (const [id, x, y, g, fxk, bag, mc] of m.bd) {
+      seenB.add(id); const b = this.bodies.get(id); if (!b) this.onBody(id, x, y, false, { g, fxk, bag }); else { b.t = this.clock; b.remote = false; }
+      if (mc) { this.medKnown = true; for (const o of cur.values()) if (!o.ghost && dist(o, { x, y }) < 90) this.deduce(o.id, 'medico', 0.8); } // corpo sendo arrastado: quem está colado nele é o Médico
+    }
+    for (const [id, o] of cur) if (!o.ghost && this.deadKnown.has(id) && id !== this.p.id) this.onReviveSeen(id, false); // vi vivo quem eu sabia que estava morto
     for (const [id, b] of [...this.bodies]) if (!seenB.has(id) && !b.remote && !b.cam && me.alive && dist(b, this.pos) < look * 0.7) { this.bodies.delete(id); this.hiddenDead.add(id); for (const o of cur.values()) if (dist(o, b) < 350) this.sus(o.id, 18, 'near'); }
     const arrowIds = new Set();
     for (const [ax, ay] of m.ar) { const key = 'a' + ax + '_' + ay; arrowIds.add(key); if (![...this.bodies.values()].some(b => dist(b, { x: ax, y: ay }) < 90)) this.bodies.set(key, { id: key, x: ax, y: ay, remote: true, t: this.clock, reactAt: this.clock + this.c('bot_react') * rnd(0.4, 1.1) }); }
@@ -100,8 +117,9 @@ export class Bot {
     if (m.co && this.camLedNear()) this.camLed = this.clock;
   }
   camLedNear() { return [[1500, 650], [980, 930], [2000, 930], [2000, 1530]].some(([x, y]) => dist({ x, y }, this.pos) < 380); }
-  onBody(id, x, y, viaCam) {
-    const b = { id, x, y, t: this.clock, first: this.clock, rep: false, cam: !!viaCam, reactAt: this.clock + this.c('bot_react') * rnd(0.4, 1.1) }; this.bodies.set(id, b); this.deadKnown.add(id); this.hiddenDead.delete(id);
+  onBody(id, x, y, viaCam, info) {
+    if (info) { if (info.fxk === 1) this.killerJob = JOB.redjohn; else if (info.fxk === 2) this.killerJob = JOB.samurai; if (info.bag) this.deduce(null, 'dexter', 0.7); if (info.g) this.deduce(null, 'vibora', 0.5); }
+    const b = { id, x, y, t: this.clock, first: this.clock, rep: false, cam: !!viaCam, vib: !!(info && info.g), reactAt: this.clock + this.c('bot_react') * rnd(0.4, 1.1) }; this.bodies.set(id, b); this.deadKnown.add(id); this.hiddenDead.delete(id);
     for (const [pid, o] of this.seen) if (pid !== id && this.clock - o.t < 12 && dist(o, b) < 380) this.sus(pid, (dist(o, b) < 200 ? 28 : 16) * (this.clock - o.t < 3 ? 1 : 0.6), 'near');
     if (this.loc && dist({ x: this.loc[0], y: this.loc[1] }, b) < 450) this.sus(this.loc[2], 18, 'near');
     const cp = this.comp.get(id); if (cp && cp.id !== this.p.id && this.clock - cp.t < 90) this.sus(cp.id, 32, 'last');
@@ -115,10 +133,11 @@ export class Bot {
     for (const o of near) this.sus(o.id, near.length === 1 ? 85 : 45, 'kill');
     if (!this.imp && this.p.alive && dist(at, this.pos) < 420 && near.length) this.danger = { from: near[0], until: this.clock + 7 };
     if (!this.imp && this.p.alive && !this.bodies.size && m.k === 'killg') this.hiddenDead.add(m.id);
+    if (!this.imp && this.p.alive && m.k === 'killg' && near.length) this.deduce(near[0].id, 'vibora', 0.6);
   }
   onMeeting(m) {
     Object.assign(this, { phase: 'meet', mtg: m, voted: false, mtgAlive: new Set(m.alive), panelDone: false, mtgStart: this.clock, goal: null, path: null, work: null, watching: false, ventUntil: 0, pendKill: null, danger: null, replies: 0, said: new Set() });
-    for (const d of m.dead) { this.deadKnown.add(d); this.meetDead.add(d); this.hiddenDead.delete(d); } this.bodies.clear(); this.accusedBy.clear(); this.heat.clear(); this.heatBy.clear(); this.pushes.clear(); this.roomClaim.clear();
+    for (const d of m.dead) { this.deadKnown.add(d); this.meetDead.add(d); this.hiddenDead.delete(d); } this.bodies.clear(); this.accusedBy.clear(); this.heat.clear(); this.heatBy.clear(); this.pushes.clear(); this.roomClaim.clear(); this.skipPush.clear(); this.votePush.clear();
     this.chatQ = this.p.alive ? this.compose(m) : [];
   }
   onPlay() { Object.assign(this, { phase: 'play', mtg: null, goal: null, path: null, work: null, lastIn: '', meetEnd: this.clock, sab: null, danger: null, watching: false }); this.bodies.clear(); for (const [id, v] of this.susp) this.susp.set(id, v + (20 - v) * 0.2); }
@@ -136,6 +155,59 @@ export class Bot {
     for (const [id, al] of list) if (!al) { this.deadKnown.add(id); if (!this.meetDead.has(id) && !this.bodies.has(id)) this.hiddenDead.add(id); }
     const dead = list.filter(([id, al]) => !al && id !== this.p.id).map(([id]) => this.nm(id)); if (this.job === 'cientista' && this.room.phase !== 'play' && dead.length) { this.chatQ.push({ at: this.clock + rnd(1.4, 3), text: `Sou cientista, olhei o painel: mortos ${dead.slice(0, 4).join(', ')}.`.slice(0, 140) }); this.chatQ.sort((a, b) => a.at - b.at); }
   }
+  // ================= v1.5: consciência de profissões, ressurreição e vínculos =================
+  // Registra uma dedução baseada no que o bot VIU (nunca em dados secretos). id=null: fato do mundo (ex.: corpo de Víbora).
+  deduce(id, job, conf, ex) {
+    if (id == null) { this.fact.add(job); return; }
+    if (id === this.p.id || id === this.lover || this.mates.has(id) || !this.roster.has(id) || this.deadKnown.has(id)) return;
+    const g = this.guess.get(id); if (g && g.conf >= conf) return; this.guess.set(id, { job, conf, t: this.clock, ex });
+    if (JOB[job]?.team === 'imp') this.sus(id, 28 * conf, job === 'metamorfo' ? 'transformou' : undefined); else if (JOB[job]?.team === 'inn') this.sus(id, -10 * conf);
+    if (job === 'medico') this.medKnown = true;
+  }
+  onRewind(m) {
+    this.path = null; this.goal = null; this.pause = 0.6; this.tlKnown = true; this.bodies.clear();
+    for (const id of m.rev || []) this.onReviveSeen(id, true);
+  }
+  // Alguém que eu dava como morto apareceu vivo (Médico ou Time Lord): atualiza o que sei e fica ciente de que existe quem ressuscite.
+  onReviveSeen(id, sure) {
+    if (id === this.p.id) return; const was = this.deadKnown.has(id);
+    this.deadKnown.delete(id); this.meetDead.delete(id); this.hiddenDead.delete(id); this.bodies.delete(id);
+    if (was || sure) { this.revSeen.add(id); if (!this.tlKnown) this.medKnown = true; }
+  }
+  // Fui ressuscitado: lembro quem me matou (a cena de morte me mostrou) e corro para contar.
+  onRevived() {
+    this.deadKnown.delete(this.p.id); this.deathBy = null; this.ghostJob = null; this.work = null; this.goal = null; this.path = null; this.pause = rnd(0.5, 1.1); this.chatQ = [];
+    this.revInfo = { ap: this.killerAp, room: this.deathRoom, at: this.clock }; this.killerAp = null;
+    if (this.revInfo.ap != null && this.revInfo.ap !== this.p.id && !this.imp && this.ec === 0 && this.usedEmerg < this.room.settings.emergencies && roll(0.8)) this.setGoal({ k: 'emerg', x: SPECIAL.emergency.x, y: SPECIAL.emergency.y + 30, r: 80, pr: 89 });
+  }
+  onLovFound(id) { this.revealedLover = id; this.known.set(id, 'impostor'); this.sus(id, 70, 'lover'); this.fact.add('lovfound'); if (this.room.phase === 'meet' || this.room.phase === 'vote') { this.chatQ.push({ at: this.clock + rnd(1, 2.2), text: `Descobri uma informação confiável: ${this.nm(id)} é impostor!`.slice(0, 140) }); this.chatQ.sort((a, b) => a.at - b.at); } }
+  // Existe alguém que possa trazer mortos de volta? Se sim, não vale correr para reportar cada corpo.
+  reviverPossible() {
+    if (this.tlKnown || this.medKnown) return true;
+    return [...this.claims].some(([id, c]) => (c.job === 'timelord' || c.job === 'medico') && !this.deadKnown.has(id) && this.trusted.has(id));
+  }
+  // O corpo ainda deve esperar antes de ser reportado? (só inocentes comuns; Médico e Time Lord usam a própria habilidade)
+  waitForRevive(b) {
+    if (this.imp || this.job === 'medico' || !this.reviverPossible() || (this.danger && this.clock < this.danger.until)) return false;
+    const age = this.clock - (b.first ?? b.t); b.wait ??= rnd(9, 20) * (0.7 + this.trait.brave * 0.3); return age < b.wait;
+  }
+  bodyReady(b) {
+    if (this.clock < b.reactAt) return false;
+    if (this.job === 'timelord' && this.ab.cd.rewind <= 0 && this.ab.us.tl > 0 && this.clock - (b.first ?? b.t) < this.c('tl_rew') - 2) return false; // Time Lord: primeiro tenta voltar o tempo
+    if (this.job === 'medico' && this.medWants(b)) return false;
+    return !this.waitForRevive(b);
+  }
+  medWants(b) { return this.p.alive && this.ab.us.med > 0 && !(this.ab.cd.revive > 0) && !b.vib && !b.cam && !b.remote && !this.fz.includes('enfermaria') && !this.meetDead.has(b.id); }
+  // Médico: pega o corpo, leva até a Enfermaria e ressuscita (tudo pelas mesmas mensagens de um jogador).
+  medicTick(use) {
+    if (!this.p.alive || (this.danger && this.clock < this.danger.until)) return;
+    if (this.xt.carry > 0) { this.setGoal({ k: 'mrevive', x: 480, y: 960, r: 70, pr: 96 }); return; }
+    if (!(this.ab.us.med > 0) || this.ab.cd.revive > 0 || !roll(0.3 + use * 0.6)) return;
+    const b = [...this.bodies.values()].filter(q => !q.rep && this.medWants(q) && dist(q, this.pos) < 900).sort((a, c) => dist(a, this.pos) - dist(c, this.pos))[0];
+    if (b) this.setGoal({ k: 'mcarry', x: b.x, y: b.y, r: 70, pr: 95, bid: b.id });
+  }
+  loversTick() { const lv = this.xt.lv; if (lv && lv[5] === 1 && lv[6] !== 1 && roll(0.7)) this.act({ t: 'ab', a: 'lovfind' }); }
+
   hear(m) {
     this.said.add(String(m.text).toLowerCase().replace(/^[^:]{1,14}:\s*/, ''));
     if (m.id === this.p.id) return; const text = String(m.text).toLowerCase(), myName = (this.roster.get(this.p.id)?.name || '').toLowerCase();
@@ -147,28 +219,45 @@ export class Bot {
       else if (defend) this.sus(id, -5 * trust);
     }
     if (this.p.alive && (this.room.phase === 'meet' || this.room.phase === 'vote')) {
+      this.keywords(m.id, text, mentioned, trust);
       const claim = this.parseClaim(text); if (claim) this.onClaim(m.id, claim, text, mentioned);
       this.trackPush(m.id, accuse, mentioned); this.checkRoomClaim(m.id, text, mentioned); this.jokerTells(m.id, text);
       this.respond(m, text, mentioned, myName.length > 1 && text.includes(myName), accuse);
     }
   }
+  // Palavras-chave que o bot entende e decide seguir (ou não) conforme confia em quem falou.
+  keywords(sp, text, mentioned, trust) {
+    const t = norm(text);
+    if (/\b(skip|skipa|skipar|skipem|pula|pulem|pular|pulo|vamos pular|ninguem vota|nao votem|ng vota|sem voto|voto em branco)\b/.test(t) && !/\bnao (vou|vamos) (pular|skipar)\b/.test(t)) this.skipPush.set(sp, this.clock);
+    if (/\b(vota|votem|votar|vamos votar|vamos de|bora votar|ejeta|ejetem|mandem)\b/.test(t)) for (const id of mentioned) if (id !== sp) (this.votePush.get(id) || this.votePush.set(id, new Map()).get(id)).set(sp, this.clock);
+    // quem diz "fulano me matou" (ressuscitado) tem palavra forte; "fui ressuscitado" também conta como pista de que existe quem reviva
+    if (/(me matou|me mataram|foi (?:o|a) .{1,14} que me matou|fui morto|fui ressuscit|fui revivid|me reviveram|me ressuscitaram|voltei (?:a|da) vida)/.test(t)) {
+      this.revSeen.add(sp); if (!this.tlKnown) this.medKnown = true;
+      for (const id of mentioned) if (id !== sp && /(me matou|me mataram|que me matou)/.test(t)) { this.sus(id, 50 * trust, 'victimsaid'); (this.heatBy.get(id) || this.heatBy.set(id, new Set()).get(id)).add(sp); }
+    }
+  }
+  skipWeight() { let w = 0; for (const [id] of this.skipPush) { if (this.deadKnown.has(id) || id === this.p.id) continue; w += this.trusted.has(id) ? 1.6 : this.discredited(id) ? 0 : 1; } return w; }
+  voteWeight(id) { let w = 0; for (const [sp] of this.votePush.get(id) || []) { if (this.deadKnown.has(sp)) continue; w += this.trusted.has(sp) ? 1.5 : this.discredited(sp) ? 0 : 0.6; } return w; }
   discredited(id) { return this.liars.has(id) || (this.execSus.get(id) || 0) >= 30 || (this.jokerSus.get(id) || 0) >= 40 || (this.susp.get(id) ?? 20) >= 78; }
   heatOf(id) { let n = 0; for (const sp of this.heatBy.get(id) || []) if (!this.discredited(sp)) n++; return n; }
   chat(text, prob = 1) {
     const talk = this.pc('bot_talk'); if (!this.p.alive || this.chatQ.length >= 3 || this.replies >= 3 + Math.round(talk * 5) || !roll(Math.min(1, prob * (0.45 + talk)))) return;
     this.replies++; this.chatQ.push({ at: this.clock + rnd(1.5, 3.8) + text.length * 0.03, text: text.slice(0, 140), reply: -1 }); this.chatQ.sort((a, b) => a.at - b.at);
   }
-  parseClaim(t) { const m = /\b(?:eu\s+)?sou\s+(?:o\s+|a\s+|um\s+|uma\s+)?(detetive|xerife|cientista|engenheiro|juiz|mentalista|localizador|barulhento|tripulante|anjo|influencer)\b/.exec(t); return m ? m[1] : null; }
+  parseClaim(t) { const m = CLAIM_RE.exec(norm(t)); if (!m) return null; const w = m[1].replace(/\s+/g, ' '); const f = CLAIM_JOBS.find(x => x[0] === w); return f ? f[1] : null; }
   // Alguém disse "sou <profissão>": confere contra o que o bot sabe e decide se confia (e o que muda no voto).
   onClaim(P, job, text, mentioned) {
-    if (P === this.p.id || this.deadKnown.has(P)) return; const jn = JOB[job]?.name || job, uniq = job !== 'tripulante' && this.room.settings['m_' + job] <= 1, prev = this.claims.get(P);
+    if (P === this.p.id || this.deadKnown.has(P)) return; const jn = JOB[job]?.name || job, uniq = job !== 'tripulante' && job !== 'lovers' && this.room.settings['m_' + job] <= 1, prev = this.claims.get(P), gs = this.guess.get(P);
+    if (job === 'lovers') { if (this.job === 'lovers') { if (P === this.lover) return; this.liars.add(P); this.sus(P, 60, 'mentira'); this.chat(`O ${this.nm(P)} não é Lovers, o meu par é outro.`, 0.7); return; } if ([...this.claims].filter(([id, c]) => c.job === 'lovers' && id !== P && !this.deadKnown.has(id)).length >= 2) { this.sus(P, 25, 'mentira'); return; } }
+    if (gs && gs.conf >= 0.9 && gs.job !== job && JOB[gs.job]?.team === 'imp') { this.liars.add(P); this.sus(P, 55, 'mentira'); this.chat(`Mentira, ${this.nm(P)}! Eu vi você agindo como ${JOB[gs.job].name}, não como ${jn}.`, 0.9); return; }
     if (prev && prev.job !== job) this.sus(P, 30, 'mentira');
     if (uniq && this.job === job && this.p.alive) { this.liars.add(P); this.sus(P, 70, 'mentira'); this.revealed = true; this.chat(pick([`Mentira! Quem é ${jn} sou eu. O ${this.nm(P)} tá mentindo.`, `O ${this.nm(P)} não é ${jn}, eu que sou!`]), 0.9); return; }
     const dup = uniq ? [...this.claims].find(([id, c]) => id !== P && c.job === job && !this.deadKnown.has(id)) : null;
     this.claims.set(P, { job, t: this.clock });
     if (dup) { this.sus(P, 22, 'mentira'); this.sus(dup[0], 22, 'mentira'); this.chat(`Dois dizendo que são ${jn}? ${this.nm(P)} e ${this.nm(dup[0])}, um de vocês tá mentindo.`, 0.7); return; }
     if (this.imp && this.mates.has(P)) return;
-    let p = clamp(0.72 - ((this.susp.get(P) ?? 20) - 20) / 100 - (this.discredited(P) ? 0.4 : 0) + (this.pc('bot_skill') - 0.5) * 0.2, 0.08, 0.9); if (this.imp) p = Math.min(p, 0.3);
+    const afterAccuse = [...this.heatBy.values()].some(sp => sp.size) && this.heatOf(P) > 0, verified = gs && gs.job === job ? 0.35 : (job === 'medico' || job === 'timelord') && this.revSeen.size ? 0.1 : 0;
+    let p = clamp(0.5 - ((this.susp.get(P) ?? 20) - 20) / 100 - (this.discredited(P) ? 0.4 : 0) - (afterAccuse ? 0.15 : 0) - (this.trusted.size >= 3 ? 0.1 : 0) + verified + (this.pc('bot_skill') - 0.5) * 0.2, 0.05, 0.9); if (this.imp) p = Math.min(p, 0.3);
     if (mentioned.includes(this.p.id) && /(impostor|joker|execution|suspeit|matou|votem|vota)/.test(text)) p = 0; // quem me acusa não ganha minha confiança
     if (roll(p)) {
       this.trusted.add(P); this.sus(P, -18);
@@ -203,15 +292,20 @@ export class Bot {
     this.revealed = true; this.chatQ.push({ at: this.clock + rnd(1.2, 2.6), text: `Terminei as tasks, sou Mentalista. ${lines}. Votem no ${this.nm(first[0])}!`.slice(0, 140) }); this.chatQ.sort((a, b) => a.at - b.at);
   }
   // Intenção da mensagem (português informal) e resposta natural, com atraso, limite por reunião e personalidade da profissão.
-  intentOf(t) {
-    const has = re => re.test(t);
-    if (has(/\b(bot|rob[oô]|ia|intelig[eê]ncia artificial|computador)\b/)) return 'bot';
-    if (has(/(qual|que)\b.*\b(profiss|fun[cç][aã]o|role|cargo|papel)/) || has(/\b(voc[eê]|vc|tu)\s+[eé]\s+(o\s+|a\s+)?(detetive|xerife|cientista|engenheiro|juiz|mentalista|localizador|barulhento)/)) return 'job';
-    if (has(/\b(onde|aonde)\b/)) return 'where';
-    if (has(/(vota|votem|votar|vamos votar|vamos tirar|ejeta|ejetar|mandar embora)/)) return 'vote';
-    if (has(/(quem (foi|matou|viu|sabe|achou)|algu[eé]m (viu|sabe|tem)|ningu[eé]m (viu|sabe)|viu algo|viu alguma|tem (alguma )?(pista|info))/) || has(/\b(voc[eê]|vc|tu)\b.*\b(viu|sabe)\b/)) return 'info';
-    if (has(/(skip|pula|pular)/)) return 'skip';
-    if (has(/\b(oi|ol[aá]|eae|e a[ií]|salve|fala|opa|hey|boa noite|bom dia|boa tarde)\b/)) return 'greet';
+  intentOf(t0) {
+    const t = norm(t0), has = re => re.test(t);
+    if (has(/\b(bot|robo|ia|inteligencia artificial|computador|maquina)\b/)) return 'bot';
+    if (has(/(ressuscit|reviv|voltou a vida|time ?lord|medico|doutor|trouxe de volta)/)) return 'revive';
+    if (has(/(qual|que)\b.*\b(profiss|funcao|role|cargo|papel|classe)/) || has(/\b(voce|vc|tu)\s+e\s+(o\s+|a\s+)?(detetive|xerife|cientista|engenheiro|juiz|mentalista|localizador|barulhento|policial|hacker|medico|advogado)/)) return 'job';
+    if (has(/\b(quem morreu|quem era o corpo|de quem e o corpo|quem e o corpo|quem foi o morto|quem foi que morreu)\b/)) return 'whoDead';
+    if (has(/\b(onde|aonde|em que sala|que sala)\b/)) return 'where';
+    if (has(/(skip|skipa|skipar|pula|pular|pulo|ninguem vota|nao votem|sem voto)/)) return 'skip';
+    if (has(/(vota|votem|votar|vamos votar|vamos tirar|ejeta|ejetar|ejetem|mandar embora|bora votar|vamos de)/)) return 'vote';
+    if (has(/(quem (foi|matou|viu|sabe|achou)|alguem (viu|sabe|tem)|ninguem (viu|sabe)|viu algo|viu alguma|tem (alguma )?(pista|info|prova))/) || has(/\b(voce|vc|tu)\b.*\b(viu|sabe)\b/)) return 'info';
+    if (has(/(confia em mim|podem confiar|pode confiar|confiem em mim|sou inocente|eu sou limpo)/)) return 'trust';
+    if (has(/\b(concordo|verdade|exato|isso mesmo|tambem acho|apoio|faz sentido)\b/)) return 'agree';
+    if (has(/\b(discordo|nao concordo|nada a ver|mentira|falso|duvido|nao acredito)\b/)) return 'disagree';
+    if (has(/\b(oi|ola|eae|e ai|salve|fala|opa|hey|boa noite|bom dia|boa tarde|tudo bem|blz|beleza)\b/)) return 'greet';
     if (has(/\?/)) return 'question';
     return 'generic';
   }
@@ -223,7 +317,7 @@ export class Bot {
     if (accusedMe) p = 1;
     else if (toMe) p = 0.96 + 0.04 * talk;
     else if (others.length) p = intent === 'vote' || accuse ? 0.12 + 0.35 * talk : 0; // fala com/sobre outro jogador
-    else if (intent === 'greet') p = 0.08 + 0.3 * talk; else if (['where', 'info', 'bot', 'job'].includes(intent)) p = 0.12 + 0.4 * talk; // pergunta para a sala toda
+    else if (intent === 'greet') p = 0.08 + 0.3 * talk; else if (['where', 'info', 'bot', 'job', 'whoDead', 'revive', 'trust'].includes(intent)) p = 0.12 + 0.4 * talk; // pergunta para a sala toda
     else if (intent === 'vote') return; // "votar em quem?" não gera cadeia de respostas
     else if (intent === 'skip') p = pron ? 0.1 + 0.2 * talk : 0.04; else p = intent === 'question' ? 0 : 0.03;
     if (!roll(p)) return;
@@ -252,7 +346,12 @@ export class Bot {
         if (J === 'joker') return pick([`Eu votaria no ${n} também. Ou em mim, sei lá.`, `Hmm, não sei, ${n} pode ser.`]);
         return e >= 38 ? pick([`Concordo, o ${n} ${reason(x)}.`, `Também desconfio do ${n}, ${reason(x)}.`]) : pick([`Por que o ${n}? Tem alguma prova?`, `Não tenho certeza do ${n}, o que você viu?`]);
       }
-      case 'skip': return pre + (top && top.v >= 40 && !imp ? `Eu não vou pular, voto no ${this.nm(top.id)}.` : pick([`Sem info eu pulo também.`, `Pular não ajuda se tiver impostor vivo...`]));
+      case 'skip': return pre + (top && top.v >= 40 && !imp ? `Eu não vou pular, voto no ${this.nm(top.id)}.` : this.trusted.has(m.id) || (this.susp.get(m.id) ?? 20) < 35 ? pick([`Se ninguém tem prova, eu pulo junto.`, `Ok, ${from}, vou pular também.`]) : pick([`Pular não ajuda se tiver impostor vivo...`, `Só pulo se ninguém tiver nada mesmo.`]));
+      case 'revive': return pre + (this.reviverPossible() ? pick([`Se tem quem ressuscite, melhor não ter pressa pra reportar corpo.`, `Já vi gente voltar, então tem Médico ou Time Lord por aqui.`]) : pick([`Ninguém voltou ainda que eu tenha visto.`, `Não vi ninguém ressuscitar, mas pode ter.`]));
+      case 'whoDead': { const d = [...this.meetDead].map(i => this.nm(i)); return pre + (d.length ? `Acho que foi o ${d[d.length - 1]}.` : pick([`Não sei quem foi.`, `Não vi o corpo direito.`])); }
+      case 'trust': return pre + (this.discredited(m.id) || (this.susp.get(m.id) ?? 20) > 50 ? pick([`Confiar só com prova, ${from}.`, `Hmm, vou ficar de olho em você.`]) : pick([`Tá bom, por enquanto confio.`, `Beleza, ${from}, confio.`]));
+      case 'agree': return toMe ? pre + pick([`Pois é.`, `Isso aí.`]) : null;
+      case 'disagree': return toMe ? pre + pick([`Então me convença com fatos.`, `Tá, mas qual a sua prova?`]) : null;
       case 'greet': return pick([`Oi!`, `E aí, ${from}.`, `Fala aí!`, `Opa, tudo certo?`]);
       case 'question': return pre + pick([`Boa pergunta, não sei.`, `Não vi nada, e você?`, `Hmm, tô tentando entender também.`]);
       default: return toMe ? pre + pick([`Fala, tô ouvindo.`, `Pode explicar melhor?`, `Tô de olho em todo mundo.`, `Concordo.`]) : null;
@@ -283,7 +382,7 @@ export class Bot {
     if (p.alive && this.sab && (!imp || roll(0.01))) { const g = this.fixGoal(); if (g && (!imp || this.sab.k !== 'heat')) this.setGoal(g); }
     if (p.alive) {
       const b = this.nearestBody();
-      if (b && this.clock >= b.reactAt) {
+      if (b && this.bodyReady(b)) {
         if (!imp) this.setGoal({ k: 'report', x: b.x, y: b.y, r: 105, pr: 90, bid: b.id });
         else if (!b.mine && roll(0.002 + this.pc('bot_lie') * 0.01)) this.setGoal({ k: 'report', x: b.x, y: b.y, r: 105, pr: 90, bid: b.id });
         else if (b.mine && !b.decided) { b.decided = true; const alone = this.witnesses(-1) === 0; if (alone && roll(0.1 * this.pc('bot_lie'))) this.setGoal({ k: 'report', x: b.x, y: b.y, r: 105, pr: 90, bid: b.id }); }
@@ -327,7 +426,7 @@ export class Bot {
     if (p.alive && this.team === 'neu') { const g = this.neutralGoal(); if (g) return void this.setGoal(g); }
     if (p.alive && this.imp) { const g = this.impGoal(); if (g) return void this.setGoal(g); }
     if (p.alive && (J === 'xerife' || J === 'mentalista' || J === 'policial')) { const t = this.topSuspect(id => !this.known.has(id) || JOB[this.known.get(id)].team !== 'inn'); if (t && t.v > 55 && p.alive && roll(0.6)) return void this.setGoal({ k: 'follow', id: t.id, r: 140, pr: 35, until: this.clock + rnd(10, 22) }); }
-    const pend = this.tasks.filter(t => !t.done && this.taskOpen(t)), task = this.pc('bot_task');
+    const pend = this.tasks.filter(t => !t.done && this.taskOpen(t) && !(this.badGoal.get('task|' + t.id) > this.clock)), task = this.pc('bot_task');
     if (pend.length && roll(task)) { const t = this.chooseTask(pend); return void this.setGoal({ k: 'task', id: t.id, x: STN[t.id].x, y: STN[t.id].y + 34, r: 50, pr: 40 }); }
     if (p.alive && roll(this.pc('bot_follow') * 0.5)) { const o = this.someoneRecent(); if (o) return void this.setGoal({ k: 'follow', id: o, r: 160, pr: 30, until: this.clock + rnd(6, 16) }); }
     if (p.alive && !this.imp && roll(this.pc('bot_cam') * 0.1)) return void this.setGoal({ k: 'cam', x: SPECIAL.camConsole.x, y: SPECIAL.camConsole.y + 30, r: 60, pr: 25 });
@@ -335,9 +434,9 @@ export class Bot {
   }
   taskOpen(t) { return !this.fz.some(id => ROOM_BY_ID[id]?.name === t.room); }
   aggr() { const a = this.pc('bot_aggr'); return this.job === 'samurai' ? clamp(a + (this.xt.arm > 0 ? 0.18 : -0.18), 0, 1) : a; }
-  chooseTask(pend) { const w = pend.map(t => 1 / (dist(STN[t.id], this.pos) + 250)); let r = Math.random() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < pend.length; i++) { r -= w[i]; if (r <= 0) return pend[i]; } return pend[0]; }
+  chooseTask(pend) { const w = pend.map(t => 1 / (dist(STN[t.id], this.pos) + 250) / (1 + 0.6 * this.crowd(STN[t.id]))); let r = Math.random() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < pend.length; i++) { r -= w[i]; if (r <= 0) return pend[i]; } return pend[0]; }
   someoneRecent() { const a = [...this.seen].filter(([id, o]) => this.clock - o.t < 15 && !this.deadKnown.has(id)); return a.length ? pick(a)[0] : null; }
-  wanderGoal() { const c = pick(CENTERS); return { k: 'wander', x: c.x + rnd(-110, 110), y: c.y + rnd(-90, 90), r: 60, pr: 10 }; }
+  wanderGoal() { const c = [...CENTERS].sort((a, b) => (this.crowd(a) + Math.random() * 2) - (this.crowd(b) + Math.random() * 2))[0]; return { k: 'wander', x: c.x + rnd(-110, 110), y: c.y + rnd(-90, 90), r: 60, pr: 10 }; }
   neutralGoal() {
     if (this.job === 'execution' && this.target != null && !this.deadKnown.has(this.target)) { const s = this.seen.get(this.target); if (s && roll(0.8)) return { k: 'follow', id: this.target, r: 150, pr: 35, until: this.clock + rnd(12, 25) }; }
     if (this.job === 'parinomo' || this.job === 'virus') { const g = this.fuelVirGoal(); if (g) return g; }
@@ -382,10 +481,18 @@ export class Bot {
     const g = this.goal; if (!g || g.done) { this.stop(); return; }
     const d = Math.hypot(g.x - this.pos.x, g.y - this.pos.y); if (d < (g.r ?? 55)) { this.arrive(); return; }
     if (this.ab?.act?.phase > 0) { this.input((g.x - this.pos.x) / (d || 1), (g.y - this.pos.y) / (d || 1)); return; } // Ghost Inc: atravessa em linha reta
-    if (!this.path || (g.dyn && this.clock > this.repath)) { this.path = findPath(this.pos.x, this.pos.y, g.x, g.y, this.fz.length ? this.fz.map(id => ROOM_BY_ID[id]) : null); this.pi = 0; this.repath = this.clock + 0.9; if (!this.path || !this.path.length) { g.done = true; this.stop(); return; } }
+    if (!this.path || (g.dyn && this.clock > this.repath)) { this.path = findPath(this.pos.x, this.pos.y, g.x, g.y, this.fz.length ? this.fz.map(id => ROOM_BY_ID[id]) : null); this.pi = 0; this.repath = this.clock + 0.9; if (!this.path || !this.path.length) { g.done = true; this.badGoal.set(g.k + '|' + (g.id ?? Math.round(g.x / 100) + ',' + Math.round(g.y / 100)), this.clock + 30); this.stop(); return; } }
     let w = this.path[this.pi]; while (w && Math.hypot(w.x - this.pos.x, w.y - this.pos.y) < 24 && this.pi < this.path.length - 1) { this.pi++; w = this.path[this.pi]; if (roll(0.05 * this.pc('bot_wait') * this.trait.brave)) { this.pause = rnd(0.4, 1.4); } }
     if (!w) return;
-    if (this.clock - this.stuckT > 1.4) { if (Math.hypot(this.pos.x - this.stuckP.x, this.pos.y - this.stuckP.y) < 8 && this.lastIn !== '0.0,0.0') this.path = null; this.stuckT = this.clock; this.stuckP = { ...this.pos }; }
+    if (this.clock < this.wiggle) { this.input(Math.cos(this.wigDir), Math.sin(this.wigDir)); return; } // destravar: anda para um lado aleatório por instantes
+    if (this.clock - this.stuckT > 1.4) {
+      if (Math.hypot(this.pos.x - this.stuckP.x, this.pos.y - this.stuckP.y) < 8 && this.lastIn !== '0.0,0.0') {
+        this.path = null; this.stuckN++;
+        if (this.stuckN >= 2) { this.wiggle = this.clock + 0.45; this.wigDir = rnd(0, Math.PI * 2); }
+        if (this.stuckN >= 4) { this.badGoal.set(this.goal.k + '|' + (this.goal.id ?? Math.round(this.goal.x / 100) + ',' + Math.round(this.goal.y / 100)), this.clock + 45); this.goal.done = true; this.stuckN = 0; this.stop(); }
+      } else this.stuckN = 0;
+      this.stuckT = this.clock; this.stuckP = { ...this.pos };
+    }
     const dx = w.x - this.pos.x, dy = w.y - this.pos.y, l = Math.hypot(dx, dy) || 1; this.input(dx / l, dy / l);
   }
   arrive() {
@@ -394,10 +501,12 @@ export class Bot {
       case 'task': this.startWork(g.id, g.fake); g.done = true; break;
       case 'report': { const b = this.bodies.get(g.bid); g.done = true; if (!b) break; if (this.eff() === 'detetive') this.act({ t: 'ab', a: 'investigate' }); this.act({ t: 'report' }); b.rep = true; break; }
       case 'fix': this.act({ t: 'fix', id: g.id }); this.pause = rnd(0.3, 0.9); g.done = true; break;
-      case 'emerg': this.act({ t: 'emergency' }); this.usedEmerg++; g.done = true; break;
+      case 'emerg': if (this.ec === 0) { this.act({ t: 'emergency' }); this.usedEmerg++; } g.done = true; break;
       case 'cam': this.act({ t: 'ab', a: 'cam' }); this.watching = true; this.watchUntil = this.clock + rnd(6, 11); g.done = true; break;
       case 'lighter': this.act({ t: 'ab', a: 'lighter' }); g.done = true; break;
       case 'drop': this.act({ t: 'ab', a: 'drop' }); g.done = true; break;
+      case 'mcarry': this.act({ t: 'ab', a: 'mcarry' }); g.done = true; this.pause = rnd(0.2, 0.5); break;
+      case 'mrevive': this.act({ t: 'ab', a: 'revive' }); g.done = true; this.pause = rnd(0.6, 1.2); break;
       case 'vent': this.act({ t: 'vent', a: 'in' }); this.ventUntil = this.clock + rnd(2, 5); g.done = true; break;
       case 'wander': case 'seek': case 'flee': g.done = true; this.pause = roll(this.pc('bot_wait')) ? rnd(0.3, 1.6) : 0; break;
       default: break;
@@ -407,7 +516,7 @@ export class Bot {
     const t = this.tasks.find(x => x.id === id && !x.done); if (!t) return; this.act({ t: 'taskStart', id });
     this.work = { id, fake, until: this.clock + TASK_MIN[t.type] / 1000 + 0.35 + rnd(0.5, 2.8) * (1.6 - this.pc('bot_skill')) };
   }
-  urgent() { if (!this.p.alive) return false; const b = this.nearestBody(); if (b && this.clock >= b.reactAt && !this.imp) return true; return !this.imp && !!this.sab && roll(0.1); }
+  urgent() { if (!this.p.alive) return false; const b = this.nearestBody(); if (b && this.bodyReady(b) && !this.imp) return true; return !this.imp && !!this.sab && roll(0.1); }
   workTick() {
     this.stop(); if (this.urgent()) { this.work = null; return; }
     if (this.clock < this.work.until) return; const w = this.work; this.work = null;
@@ -453,6 +562,8 @@ export class Bot {
       case 'parinomo': this.paTick(); break;
       case 'virus': this.virTick(); break;
       case 'dexter': this.dexTick(use); break;
+      case 'medico': this.medicTick(use); break;
+      case 'lovers': this.loversTick(); break;
       case 'metamorfo': case 'espectro': case 'impostor': case 'vibora': case 'samurai': break;
     }
     if (p.alive) this.phClickTick(use);
@@ -572,6 +683,7 @@ export class Bot {
     const out = [], me = this.p.id, imp = this.imp, J = this.job, D = this.room.settings.discuss, room = this.lastRoom || 'um corredor';
     const nMsg = Math.max(0, Math.round(this.pc('bot_talk') * this.trait.chatty * rnd(1, 3.6))), body = m.body != null ? m.body : null;
     const top = this.topSuspect(); const reason = id => ({ near: 'estava perto do corpo', vent: 'sumiu perto de um duto', sumiu: 'sumiu do nada na minha frente', duplo: 'apareceu duplicado', transformou: 'mudou de aparência', kill: 'eu vi matando', tone: 'tem a cor da pista', accused: 'tá muito suspeito', last: 'foi o último que vi com a vítima' })[this.why.get(id)] || 'age de forma estranha';
+    const pri = this.factLines();
     if (m.by === me) out.push(m.reason === 'body' ? pick([`Achei um corpo ${inR(room)}!`, `Corpo ${inR(room)}, gente!`, `Morreu alguém ${inR(room)}.`]) : pick([`Chamei porque tem algo errado.`, `Reunião: precisamos conversar.`]));
     if (J === 'detetive' && this.toneHint) out.push(`Sou detetive: a pista aponta para a cor ${this.toneHint}.${top && top.v >= 40 ? ' Desconfio do ' + this.nm(top.id) + '.' : ''}`);
     if ((imp && roll(0.25 * this.pc('bot_lie'))) || (J === 'joker' && roll(0.2))) {
@@ -600,9 +712,28 @@ export class Bot {
       out.push(pick([`Não vi ninguém. Mas o ${o} me seguiu.`, `Tava ${inR(pick(CENTERS).name)}, mas não sei se alguém me viu.`, `Sei lá, ${o} tá com cara de culpado.`, `Hmm... foi o ${o}? Ou foi o ${this.nm(pick([...this.mtgAlive]))}?`]));
       out.push(pick([`Eu tava perto do corpo, mas só passei por ali.`, `Ninguém me viu fazendo task, né? Estranho.`, `Podem votar em mim se quiserem, tanto faz.`]));
     }
-    const slots = out.slice(0, Math.max(nMsg, m.by === me ? 1 : 0)), res = []; let at = this.clock + rnd(1.5, 5);
+    const slots = [...pri.slice(0, 2), ...out.slice(0, Math.max(nMsg, m.by === me ? 1 : 0))], res = []; let at = this.clock + rnd(1.5, 5);
     for (const text of slots) { res.push({ at, text }); at += rnd(2.2, Math.max(4, D * 0.22)); }
     return res.filter(x => x.at < this.clock + D * 0.9 || true);
+  }
+  // Frases de dedução baseadas no que o bot realmente viu/ouviu/descobriu (impostores não entregam a si mesmos).
+  factLines() {
+    const L = [], rn = id => this.nm(id), col = id => { const c = cname(this.roster.get(id)?.look.c); return c ? ` (${c})` : ''; };
+    if (this.revInfo && this.p.alive) { const k = this.revInfo.ap; L.push(k != null && k !== this.p.id && !this.imp ? `Eu morri e fui ressuscitado! Quem me matou foi o ${rn(k)}${col(k)}${this.revInfo.room ? ', ' + inR(this.revInfo.room) : ''}!` : `Eu morri e fui ressuscitado, mas não vi quem foi.`); }
+    if (this.revealedLover != null && !this.deadKnown.has(this.revealedLover)) L.push(`Tenho uma informação confiável: ${rn(this.revealedLover)} é impostor, votem nele!`);
+    if (!this.imp) {
+      for (const [id, g] of this.guess) {
+        if (this.deadKnown.has(id) || g.conf < 0.8 || JOB[g.job]?.team !== 'imp') continue;
+        if (g.job === 'metamorfo') L.push(g.ex?.from != null && g.ex.to != null ? `Vi o ${rn(g.ex.from)}${col(g.ex.from)} virar ${rn(g.ex.to)}${col(g.ex.to)} na minha frente! Ele é Metamorfo!` : `Vi o ${rn(id)} mudar de aparência. Ele é Metamorfo!`);
+        else if (g.job === 'vibora') L.push(`O corpo sumiu na frente do ${rn(id)}, ele deve ser Víbora.`);
+      }
+      if (this.killerJob && JOB[this.killerJob.id]?.team === 'imp') L.push(`O jeito que o corpo ficou mostra que o assassino é ${this.killerJob.name}.`);
+      if (this.fact.has('dexter')) L.push(`Vi um saco de corpo, tem um Dexter aqui.`);
+      if (this.tlKnown) L.push(`Voltaram o tempo! Tem Time Lord, melhor não reportar corpo correndo.`);
+      else if (this.medKnown) L.push(`Vi gente voltar à vida ou corpo sendo carregado, deve ter Médico.`);
+    }
+    this.revInfo = this.revInfo && this.p.alive ? this.revInfo : null;
+    return L;
   }
   voteTick() {
     if (this.voted || !this.p.alive || this.phase !== 'vote' || this.clock < this.voteAt) return; this.voted = true; const v = this.decideVote();
@@ -613,21 +744,27 @@ export class Bot {
     this.act({ t: 'vote', to: v.to, sup: v.sup ? 1 : 0, spend: v.spend || 0 });
   }
   decideVote() {
-    const me = this.p.id, alive = [...this.mtgAlive].filter(i => i !== me), J = this.job, err = roll(this.pc('bot_err') * 0.5);
+    const me = this.p.id, alive = [...this.mtgAlive].filter(i => i !== me && i !== this.lover), J = this.job, err = roll(this.pc('bot_err') * 0.5);
     if (!alive.length) return { to: 'skip' };
+    const skipW = this.skipWeight();
     if (J === 'execution' && this.target != null && alive.includes(this.target) && !err) return { to: this.target };
     if (this.imp) {
       const crew = alive.filter(i => !this.mates.has(i)); if (!crew.length) return { to: 'skip' };
-      crew.sort((a, b) => (this.heatOf(b) * 10 + (this.susp.get(b) ?? 20) + rnd(0, 8)) - (this.heatOf(a) * 10 + (this.susp.get(a) ?? 20) + rnd(0, 8)));
-      if (err || (this.heatOf(crew[0]) === 0 && roll(0.4))) return roll(0.5) ? { to: pick(crew) } : { to: 'skip' };
+      const score = i => this.heatOf(i) * 10 + this.voteWeight(i) * 6 + (this.susp.get(i) ?? 20) + rnd(0, 8);
+      crew.sort((a, b) => score(b) - score(a));
+      if (err) return roll(0.3) ? { to: pick(crew) } : { to: 'skip' };
+      if (this.heatOf(crew[0]) === 0 && this.voteWeight(crew[0]) < 1) return skipW >= 1.5 || roll(0.5) ? { to: 'skip' } : { to: crew[0] }; // sem onda de acusação: pula ou segue o líder
       return { to: crew[0] };
     }
-    if (J === 'joker') return roll(0.55) ? { to: pick(alive) } : { to: 'skip' };
-    const cand = alive.map(id => ({ id, e: this.evidence(id) + this.heatOf(id) * 8 })).sort((a, b) => b.e - a.e);
+    if (J === 'joker') return roll(0.5) ? { to: pick(alive) } : { to: 'skip' };
+    const cand = alive.map(id => ({ id, e: this.evidence(id) + this.heatOf(id) * 8 + this.voteWeight(id) * 5 })).sort((a, b) => b.e - a.e);
     const jk = cand.filter(x => (this.jokerSus.get(x.id) || 0) >= 40 && x.e < 90); if (jk.length) { for (const x of jk) cand.splice(cand.indexOf(x), 1); this.chat(`Acho que o ${this.nm(jk[0].id)} é Joker, vou evitar votar nele.`, 0.5); } if (!cand.length) return { to: 'skip' };
     const best = cand[0], thr = clamp(54 - this.pc('bot_sus') * 20 - this.pc('bot_skill') * 8, 30, 66);
-    if (err) return roll(0.5) ? { to: pick(alive) } : { to: 'skip' };
-    if (best.e >= thr) return { to: best.id, sup: this.supLeft > 0 && best.e >= 90 && (J === 'juiz' || J === 'mentalista') };
-    return roll(0.7) ? { to: 'skip' } : { to: pick(alive) };
+    if (err) return roll(0.2) ? { to: pick(alive) } : { to: 'skip' }; // erro humano raramente vira voto aleatório
+    const grounded = this.known.has(best.id) || this.why.has(best.id) || this.heatOf(best.id) >= 2 || best.e >= 85; // precisa de um motivo concreto
+    const late = alive.length <= 3; // pouca gente viva: pular pode custar a partida
+    const need = thr + (skipW >= 2.5 && best.e < 80 ? 22 : skipW >= 1.5 && best.e < 70 ? 10 : 0) - (late ? 10 : 0);
+    if (best.e >= need && (grounded || late)) return { to: best.id, sup: this.supLeft > 0 && best.e >= 90 && (J === 'juiz' || J === 'mentalista') };
+    return { to: 'skip' };
   }
 }

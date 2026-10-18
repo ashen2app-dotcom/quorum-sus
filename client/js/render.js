@@ -140,6 +140,7 @@ export function addShake(v) { R.shake = Math.max(R.shake, v); }
 export function fx(kind, x, y, col = '#fff') {
   if (kind === 'kill') { R.flash = 0.5; addShake(10); R.zoomKick = 1; for (let i = 0; i < 26; i++) { const a = Math.random() * TAU, s = 80 + Math.random() * 220; part(x, y - 20, Math.cos(a) * s, Math.sin(a) * s, 0.7, 3 + Math.random() * 4, col, 200); } }
   if (kind === 'killg') { R.flash = 0.25; addShake(6); for (let i = 0; i < 30; i++) { const a = Math.random() * TAU, s = 40 + Math.random() * 140; part(x, y - 20, Math.cos(a) * s, Math.sin(a) * s - 40, 1.2, 3 + Math.random() * 5, '#4fd36b', -30); } }
+  if (kind === 'revive') { R.flash = 0.3; for (let i = 0; i < 28; i++) { const a = Math.random() * TAU, s = 30 + Math.random() * 120; part(x, y - 10, Math.cos(a) * s, Math.sin(a) * s - 90, 1.1, 3 + Math.random() * 4, i % 2 ? '#6bd968' : '#ffffff', -40); } }
   if (kind === 'confetti') for (let i = 0; i < 6; i++) part(x + Math.random() * 600, y, (Math.random() - 0.5) * 80, 120 + Math.random() * 160, 3, 5, ['#2de2c5', '#ffb347', '#ff4f6d', '#6bd968'][i % 4], 30);
   if (kind === 'dust') part(x, y, (Math.random() - 0.5) * 20, -10, 0.5, 3, 'rgba(255,255,255,.3)');
 }
@@ -222,7 +223,8 @@ export function render(S, dt) {
   for (const b of S.bodies) if (vis(b.x - 40, b.y - 60, 80, 80)) {
     const p = 0.5 + 0.5 * Math.sin(t * 5); ctx.fillStyle = b.g ? `rgba(79,211,107,${0.2 + p * 0.25})` : `rgba(255,79,109,${0.15 + p * 0.2})`; ctx.beginPath(); ctx.ellipse(b.x, b.y, 34 + p * 6, 14 + p * 3, 0, 0, TAU); ctx.fill();
     if (b.bag) { ctx.globalAlpha = b.bag === 2 ? 0.45 : 1; drawBag(ctx, b.x, b.y, t); ctx.globalAlpha = 1; continue; }
-    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(1.35); drawCrew(ctx, b.look, 0, 14, { t, dead: true, s: 1 }); ctx.restore();
+    ctx.save(); ctx.translate(b.x, b.y - (b.mc ? 22 : 0)); ctx.rotate(1.35); drawCrew(ctx, b.look, 0, 14, { t, dead: true, s: 1 }); ctx.restore();
+    if (b.mc) { ctx.fillStyle = '#ff4f6d'; ctx.fillRect(b.x - 3, b.y - 62, 6, 16); ctx.fillStyle = '#4aa8ff'; ctx.fillRect(b.x - 8, b.y - 57, 16, 6); }
     if (b.fx === 1) drawCry(ctx, b.x + 4, b.y - 34, t); else if (b.fx === 2) drawSlash(ctx, b.x, b.y, b.id);
   }
   for (const id of S.fz || []) { const r = ROOM_BY_ID[id]; if (r && vis(r.x, r.y, r.w, r.h)) drawFrozen(ctx, r, t, r.name); }

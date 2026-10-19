@@ -241,3 +241,15 @@ body.touch #joyZone{left:env(safe-area-inset-left);z-index:8;width:calc(42% - en
 body.touch .panel,body.touch #hTasks,body.touch #mapbox{backdrop-filter:none;-webkit-backdrop-filter:none}
 body.touch #acts button.rdy{box-shadow:none}
 body.touch #meeting *{animation-duration:.01ms!important}
+
+/* ---- v2.0 ---- */
+#roul{position:fixed;left:50%;top:22%;transform:translateX(-50%);z-index:38;display:none;flex-direction:column;align-items:center;gap:4px;background:var(--pan);border:3px solid #3ddc5a;border-radius:18px;padding:12px 26px;font-size:clamp(20px,4vw,38px);font-weight:800;color:#9dffb0;text-align:center;pointer-events:none;box-shadow:0 0 40px rgba(61,220,90,.45)}
+#roul.on{display:flex}#roul small{font-size:14px;color:var(--dim)}
+#inqc{position:fixed;inset:0;width:100%;height:100%;z-index:37;pointer-events:none}
+#camUI button[data-c]{min-width:40px;padding:6px 10px}
+#pkL button:disabled.pk{opacity:1;cursor:default}
+body.touch #camUI{flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 20px);gap:8px;padding:8px 10px}
+body.touch #camUI span{flex-basis:100%;text-align:center;font-size:13px}
+body.touch #roul{top:calc(18% + env(safe-area-inset-top));max-width:80vw;padding:8px 16px}
+body.touch #acts button.long{font-size:8px}
+@media (max-height:420px){body.touch #abil{max-width:100%}}

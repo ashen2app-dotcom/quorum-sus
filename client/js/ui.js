@@ -84,7 +84,7 @@ export function openMeeting(m, ctx) {
     const dead = !m.alive.includes(id), card = el('div', 'card2' + (dead ? ' dead' : '')), cv = el('canvas'); cv.width = 100; cv.height = 124;
     drawCrew(cv.getContext('2d'), p.look, 50, 118, { s: 1.4, ghost: dead, alpha: dead ? 0.6 : 1, dead });
     card.append(cv, el('div', 'nm', p.name), el('div', 'vs')); if (ctx.mates && ctx.mates.has(id) && id !== ctx.me) card.append(el('span', 'chip ally', 'ALIADO')); if (m.off && m.off.includes(id)) card.append(el('span', 'chip off', 'OFFLINE')); else if (m.gone && m.gone.includes(id)) card.append(el('span', 'chip off', 'SAIU'));
-    card.onclick = () => { if (M.phase !== 'vote' || dead || M.voted || !ctx.alive) return; M.sel = id; M.cards.forEach(c => c.classList.remove('sel')); card.classList.add('sel'); $('mVote').disabled = false; sfx('click'); };
+    card.onclick = () => { if (M.phase !== 'vote' || dead || card.classList.contains('dead') || M.voted || !M.ctx.alive) return; M.sel = id; M.cards.forEach(c => c.classList.remove('sel')); card.classList.add('sel'); $('mVote').disabled = false; sfx('click'); };
     M.cards.set(id, card); list.append(card);
   }
   $('mVote').disabled = true; $('mSkip').disabled = true;
@@ -128,6 +128,7 @@ export function closeMeeting() { clearInterval(M.iv); cancelAnimationFrame(ejRaf
 
 // ---------- profissões (configuração do host) ----------
 let jtab = 'inn';
+const INLINE = { chuck: ['chk_dur', 'chk_cd'], bombardeiro: ['bmb_r', 'bmb_fuse', 'bmb_cd', 'bmb_max'], jackpot: ['jp_w_kill', 'jp_w_speed', 'jp_w_shield'], inquisidor: ['inq_tries'], sabotador: ['trap_max', 'trap_cd', 'trap_r'], ninja: ['nin_speed', 'nin_killcd', 'nin_range', 'nin_scd'], faxineiro: ['fax_time', 'fax_cd'], trocador: ['swp_cd', 'swp_uses'], seguranca: ['seg_mode'] };
 export function renderJobs(L, myId, send) {
   const host = L.host === myId, tabs = $('jTabs'), body = $('jBody'); tabs.innerHTML = ''; body.innerHTML = ''; if (!host && jtab === 'bots') jtab = 'inn';
   for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['rules', '⚙ Regras'], ['bots', '🤖 Bots']].filter(([k]) => k !== 'bots' || host)) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
@@ -149,7 +150,9 @@ export function renderJobs(L, myId, send) {
   for (const j of JOBS.filter(x => x.team === jtab)) {
     const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); paintJob(nm, j);
     row.append(nm, el('small', null, j.desc + (j.ghost ? ' (só recebida após morrer)' : '')), slider(j.ghost ? 'Chance ao morrer' : 'Chance de aparecer', 'w_' + j.id, 0, 100, 5, v => v + '%'));
-    if (j.id !== 'tripulante') row.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v)); body.append(row);
+    if (j.id !== 'tripulante') row.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v));
+    for (const k of INLINE[j.id] || []) { const p = PARAMS.find(q => q.k === k); if (p) row.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); } // v2.0: ajustes principais direto no cartão da profissão
+    body.append(row);
   }
 }
 // ---------- seleção de jogador / mensagem / painel ----------
@@ -177,9 +180,9 @@ const WIN = { crew: ['EQUIPE VENCEU', '#2de2c5', 'rgba(20,90,80,.8)'], imp: ['IM
 export function showEnd(m, roster, me) {
   const [title, col, bg] = WIN[m.winner] || WIN.crew, t = $('eTitle'); t.textContent = title; t.style.color = col; t.style.textShadow = `0 0 40px ${col}`;
   $('eReason').textContent = m.reason; const l = $('eList'); l.innerHTML = '';
-  for (const [id, role, alive, job] of m.roles) { const p = roster.get(id), J = JOB[job], d = el('div', role === 'imp' ? 'imp' : '', `${p?.name || '?'} · `); const s = el('b', null, J?.name || '?'); paintJob(s, J); d.append(s, document.createTextNode(alive ? '' : ' ☠')); l.append(d); }
+  for (const [id, role, alive, job] of m.roles) { const p = roster.get(id), J = JOB[job], d = el('div', role === 'imp' ? 'imp' : '', `${p?.name || '?'} · `); const s = el('b', null, J?.name || '?'); paintJob(s, J); d.append(s, document.createTextNode((alive ? '' : ' ☠') + ((m.co || []).includes(id) ? ' ★ vitória individual' : ''))); l.append(d); }
   $('end').style.background = `radial-gradient(circle,${bg},rgba(4,8,18,.96))`; show('end');
-  const won = m.winner === 'crew' ? me.team !== 'imp' && !['joker', 'execution'].includes(me.job) : m.winner === 'imp' ? me.team === 'imp' : m.winner === 'joker' ? me.job === 'joker' : me.job === 'execution';
+  const co = (m.co || []).includes(me.id), won = co || (m.winner === 'crew' ? me.team === 'inn' : m.winner === 'imp' ? me.team === 'imp' : m.winner === 'joker' ? me.job === 'joker' : m.winner === 'exec' ? me.job === 'execution' : m.who === me.id);
   sfx(won ? 'win' : 'lose');
 }
 
@@ -246,5 +249,52 @@ export function meetScene(m, roster) {
     if (t < 0.1) { c.fillStyle = `rgba(255,255,255,${0.7 - t * 7})`; c.fillRect(0, 0, W, H); }
     if (!body && t > 0.92 && t < 1.02) { c.fillStyle = 'rgba(255,60,80,.45)'; c.fillRect(0, 0, W, H); }
     mRaf = requestAnimationFrame(frame);
+  })(t0);
+}
+
+// ---------- v2.0: reunião (mortes durante a reunião), painel do Sábio, roleta do Jackpot e cenas do Inquisidor ----------
+export function markDead(id) { const c = M.cards.get(id); if (!c || c.classList.contains('dead')) return; c.classList.add('dead'); c.append(el('span', 'chip off', '✕ MORTO')); if (M.sel === id) { M.sel = null; M.cards.forEach(x => x.classList.remove('sel')); $('mVote').disabled = true; } }
+export function setAlive(v) { if (M.ctx) M.ctx.alive = v; if (!v) { $('mVote').disabled = true; $('mSkip').disabled = true; } }
+export function pickInfo(title, lines, key) { // painel só de leitura
+  const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; $('pkT').dataset.k = key || ''; l.innerHTML = '';
+  lines.forEach((t, i) => { const b = el(i === 0 ? 'p' : 'button', i === 0 ? 'hint' : 'pk', t); if (i) b.disabled = true; l.append(b); });
+  $('pkX').onclick = () => { p.classList.remove('on'); $('pkT').dataset.k = ''; }; lockPick(p); p.classList.add('on');
+}
+let rlTo = 0;
+export function roulette(ab, again, round) { // roleta privada do Jackpot (só ele recebe a mensagem)
+  const box = $('roul'), names = { kill: '🗡 ASSASSINO', speed: '⚡ VELOCIDADE', shield: '🛡 ESCUDO DO ANJO' }, order = ['kill', 'speed', 'shield'];
+  clearTimeout(rlTo); box.classList.add('on'); const t0 = performance.now(), spin = again ? 0 : 1800; let i = 0;
+  const tick = () => { const t = performance.now() - t0; if (t < spin) { box.textContent = '🎰 ' + names[order[i++ % 3]]; sfx('click'); rlTo = setTimeout(tick, 90 + t / 14); } else { box.innerHTML = ''; box.append(el('small', null, again ? 'Sua habilidade nesta rodada' : `Roleta — rodada ${round || ''}`), el('b', null, names[ab] || '?')); sfx('ok'); rlTo = setTimeout(() => box.classList.remove('on'), again ? 2200 : 3600); } };
+  tick();
+}
+let iqRaf = 0;
+export function inqScene(m, roster) {
+  document.getElementById('inqc')?.remove(); cancelAnimationFrame(iqRaf);
+  const A = roster.get(m.a), V = roster.get(m.v), hit = m.k === 'hit'; if (!A || !V) return;
+  const cv = document.createElement('canvas'); cv.id = 'inqc'; cv.width = innerWidth; cv.height = innerHeight; document.body.append(cv);
+  const c = cv.getContext('2d'), W = cv.width, H = cv.height, sc = Math.min(W, H) / 150, t0 = performance.now(), DUR = 4.2, gy = H * 0.72; sfx(hit ? 'kill' : 'bad');
+  const knife = (x, y, ang, s) => { c.save(); c.translate(x, y); c.rotate(ang); c.scale(s, s); c.fillStyle = '#5b4a3a'; c.fillRect(-3, 0, 6, 16); c.fillStyle = '#dfe6f2'; c.beginPath(); c.moveTo(-4, 0); c.lineTo(4, 0); c.lineTo(0, -30); c.closePath(); c.fill(); c.restore(); };
+  (function frame(now) {
+    const t = (now - t0) / 1000; if (t > DUR) { cv.remove(); return; }
+    cv.style.opacity = t > DUR - 0.5 ? (DUR - t) / 0.5 : 1; c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = hit ? '#0d0510' : '#10080a'; c.fillRect(0, 0, W, H);
+    const g = c.createRadialGradient(W / 2, H * 0.6, 10, W / 2, H * 0.6, Math.max(W, H) * 0.7); g.addColorStop(0, hit ? 'rgba(150,20,90,.5)' : 'rgba(200,40,40,.45)'); g.addColorStop(1, 'rgba(5,3,10,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    c.fillStyle = 'rgba(255,255,255,.06)'; c.fillRect(0, gy, W, H - gy);
+    if (hit) { // a vítima do palpite pega a faca e se mata
+      const k = Math.max(0, Math.min(1, (t - 1.5) / 0.6)), fall = Math.max(0, Math.min(1, (t - 2.1) / 0.8)); c.save(); c.translate(W / 2, gy); c.rotate(fall * 1.5); c.scale(sc, sc); drawCrew(c, V.look, 0, 0, { t, face: 1, dead: fall > 0 }); c.restore();
+      if (fall < 0.2) knife(W / 2 - 18 * sc * (1 - k) + 6 * sc, gy - (70 - 28 * k) * sc, Math.PI * (0.9 + 0.1 * k) + 0.4, sc * 0.9);
+      if (t > 2.05 && t < 2.3) { c.fillStyle = 'rgba(255,255,255,.6)'; c.fillRect(0, 0, W, H); }
+    } else { // o Inquisidor avança, ataca e tem um infarto
+      const e = Math.min(1, t / 1.2), kx = -W * 0.1 + (W * 0.38 + W * 0.1) * (1 - Math.pow(1 - e, 3)), fall = Math.max(0, Math.min(1, (t - 2.3) / 0.8));
+      c.save(); c.translate(W * 0.64, gy); c.scale(sc, sc); drawCrew(c, V.look, 0, 0, { t, face: -1 }); c.restore();
+      c.save(); c.translate(kx, gy); c.rotate(fall * 1.5); c.scale(sc, sc); drawCrew(c, A.look, 0, 0, { t, face: 1, moving: t < 1.2, dead: fall > 0 }); c.restore();
+      if (t < 1.8) knife(kx + 24 * sc, gy - 50 * sc, 0.8 + Math.sin(t * 8) * 0.1, sc * 0.9);
+      if (t > 1.7 && t < 2.6) { const p = 1 + 0.25 * Math.sin(t * 22); c.save(); c.translate(kx + 10 * sc, gy - 36 * sc); c.scale(p * sc * 0.5, p * sc * 0.5); c.fillStyle = '#ff2a4a'; c.beginPath(); c.moveTo(0, 10); c.bezierCurveTo(-30, -10, -14, -34, 0, -16); c.bezierCurveTo(14, -34, 30, -10, 0, 10); c.fill(); c.restore(); c.strokeStyle = '#ff2a4a'; c.lineWidth = 3; for (let i = 0; i < 6; i++) { const a = i * 1.05 + t * 3; c.beginPath(); c.moveTo(kx + 10 * sc + Math.cos(a) * 26 * sc, gy - 36 * sc + Math.sin(a) * 26 * sc); c.lineTo(kx + 10 * sc + Math.cos(a) * 38 * sc, gy - 36 * sc + Math.sin(a) * 38 * sc); c.stroke(); }
+        if (Math.sin(t * 30) > 0) { c.fillStyle = 'rgba(255,0,40,.12)'; c.fillRect(0, 0, W, H); } }
+    }
+    c.textAlign = 'center'; c.shadowColor = '#000'; c.shadowBlur = 14; c.fillStyle = hit ? '#ff7ac8' : '#ff4f6d'; c.font = `800 ${Math.max(24, Math.min(W / 16, H / 8))}px "Baloo 2",system-ui,sans-serif`;
+    c.fillText(hit ? `${V.name} SE MATOU!` : `${A.name} TEVE UM INFARTO!`, W / 2, H * 0.2); c.font = `700 ${Math.max(15, Math.min(W / 34, H / 16))}px "Baloo 2",system-ui,sans-serif`; c.fillStyle = '#e9f1ff';
+    c.fillText(hit ? 'O Inquisidor acertou a profissão.' : `O Inquisidor errou a profissão de ${V.name}.`, W / 2, H * 0.2 + Math.max(26, H / 11)); c.shadowBlur = 0;
+    iqRaf = requestAnimationFrame(frame);
   })(t0);
 }

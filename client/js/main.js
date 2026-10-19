@@ -1,12 +1,12 @@
 // Orquestra tudo: perfil, rede, estado do jogo, entrada, HUD e loop principal.
 import { net } from './net.js';
-import { initRender, render, R, fx, addShake, setQuality, drawCrew, toWorld } from './render.js';
+import { initRender, render, R, fx, addFx, addShake, setQuality, drawCrew, toWorld } from './render.js';
 import { initAudio, A, sfx, alarm } from './audio.js';
 import { openTask, TASK_MIN } from './tasks.js';
 import * as UI from './ui.js';
 import { ROOMS, RECTS, STATIONS, VENTS, SPECIAL, CAMS, canStand, WORLD, FREEZABLE, ROOM_BY_ID } from '/shared/map.js';
 import { sanitizeName } from '/shared/cosmetics.js';
-import { JOB, TEAMS, ABIL, INF_MSGS, paintJob } from '/shared/jobs.js';
+import { JOB, JOBS, TEAMS, ABIL, INF_MSGS, paintJob } from '/shared/jobs.js';
 
 const $ = id => document.getElementById(id);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -20,7 +20,7 @@ const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new S
 S.taskFrozen = t => { const s = STATIONS.find(q => q.id === t.id); return !!s && S.fz.some(id => ROOM_BY_ID[id]?.name === s.room); };
 const frozenHit = (x, y) => { for (const id of S.fz) { const r = ROOM_BY_ID[id]; if (r && x + 12 > r.x && x - 12 < r.x + r.w && y + 12 > r.y && y - 12 < r.y + r.h) return true; } return false; };
 const send = o => net.send(o);
-Object.assign(S, { deadKnown: new Set(), meetPos: null, meetBody: null, emergCd: 0 });
+Object.assign(S, { deadKnown: new Set(), meetPos: null, meetBody: null, emergCd: 0, bombs: [], protId: -1, camSel: 0, inqLeft: 0, sageWant: false, jpAb: null });
 initRender($('game'));
 
 // ---------- navegação ----------
@@ -76,13 +76,14 @@ net.on('lobby', m => {
   UI.renderLobby(m, S.id, send, m.min);
 });
 function begin(m, resume) {
-  S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t })); S.xt = {}; S.lover = m.lover ?? null; S.lov = null; S.lovFound = null; S.fz = []; S.bank = 0; S.spend = 0; S.voted = false;
+  S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t })); S.xt = {}; S.lover = m.lover ?? null; S.lov = null; S.lovFound = null; S.fz = []; S.bank = 0; S.spend = 0; S.voted = false; S.bombs = []; S.protId = m.pr ?? -1; S.camSel = 0; S.inqLeft = 0; S.jpAb = null; S.sageWant = false;
   Object.assign(S.me, { x: m.x, y: m.y, alive: m.alive !== false, vent: -1, moving: false }); S.players.clear(); S.bodies = []; S.deadKnown = new Set(); S.sab = null; S.emergUsed = m.emergUsed || 0; S.settings = m.settings;
   const mine = S.roster.get(S.id); S.look = mine.look; S.name = mine.name; S.hideMe = false; S.vr = 420; R.cam.x = m.x; R.cam.y = m.y; R.vis = 420;
   go(null); $('hud').classList.remove('hide'); $('sabMenu').classList.add('hide');
   const imp = S.role === 'imp'; document.querySelectorAll('#bSab,#bKill').forEach(b => b.classList.toggle('hide', !imp)); hideBig();
   if (!resume) { $('hud').classList.add('hide'); S.introEnd = performance.now() + 4300; intro(); } else S.introEnd = 0;
   hudTasks(); buildAbil();
+  if (!resume && m.job === 'seguranca') setTimeout(() => UI.toast(m.pr != null ? `🛡 Você protege ${S.roster.get(m.pr)?.name || '?'}${m.ally ? ' — um IMPOSTOR: você joga com os impostores!' : '. Se ele morrer, você morre.'}` : '🛡 Escolha quem proteger (botão PROTEGER). Se o protegido morrer, você morre.', 9000), 4400);
 }
 net.on('start', m => begin(m, false));
 net.on('resume', m => { begin(m, true); if (m.phase !== 'play') { $('hud').classList.add('hide'); S.phase = m.phase; UI.toast('Reconectado. Aguarde a próxima fase.'); } else UI.toast('Reconectado!'); });
@@ -114,13 +115,14 @@ net.on('snap', m => {
   for (const id of [...S.players.keys()]) if (!seen.has(id)) S.players.delete(id);
   S.bodies = m.bd.map(([id, bx, by, bg, bfx, bbag, bmc]) => ({ id, x: bx, y: by, g: !!bg, fx: bfx | 0, bag: bbag | 0, mc: bmc | 0, look: (S.roster.get(id) || { look: P.look }).look })); for (const b of S.bodies) S.deadKnown.add(b.id);
   const hadSab = S.sab; S.sab = m.sab; S.vr = m.vr; S.cd = m.cd || [0, 0]; S.tk = m.tk; S.emergCd = m.ec | 0; S.intro = m.intro; S.ab = m.ab; S.loc = m.loc; S.probe = m.probe; S.sup = m.ab.sup;
-  S.xt = m.xt || {}; S.lov = S.xt.lv || null; { const nf = m.fz || []; if (nf.length !== S.fz.length) { S.fz = nf; hudTasks(); } } S.cams = m.cams || null; S.camsOn = !!m.co; $('hud').classList.toggle('incam', !!m.cams); $('camUI').classList.toggle('hide', !m.cams);
+  S.bombs = (m.bm || []).map(([id, x, y, t]) => ({ id, x, y, t })); S.xt = m.xt || {}; S.lov = S.xt.lv || null; { const nf = m.fz || []; if (nf.length !== S.fz.length) { S.fz = nf; hudTasks(); } } S.cams = m.cams || null; S.camsOn = !!m.co; $('hud').classList.toggle('incam', !!m.cams); $('camUI').classList.toggle('hide', !m.cams);
   S.arrows = buildArrows(m, vent);
   if (!!hadSab !== !!S.sab || hadSab?.k !== S.sab?.k) alarm(S.sab?.k === 'heat');
 });
 net.on('taskOk', m => { const t = S.myTasks.find(q => q.id === m.id); if (t) t.done = true; hudTasks(); });
 net.on('fx', m => { S.deadKnown.add(m.id); const r = S.roster.get(m.id); if (!r) return; R.dying.push({ x: m.x, y: m.y, look: r.look, t: 0 }); fx(m.k, m.x, m.y, m.k === 'killg' ? '#4fd36b' : '#ff4f6d'); sfx('kill'); });
-net.on('died', m => { S.me.alive = false; closeTaskUi(); S.arrows = []; S.loc = null; buildAbil(); UI.toast(m.by === 'link' ? 'Seu par dos Lovers morreu e a ligação levou você junto. Agora você é um fantasma.' : S.role === 'imp' ? 'Você foi expulso. Continue como fantasma.' : 'Você foi eliminado. Agora você é um fantasma.'); });
+const DIED = { inq: 'O Inquisidor adivinhou a sua profissão. Você foi eliminado.', inqmiss: 'Você errou a profissão e sofreu um infarto. Agora você é um fantasma.', trap: 'Você abriu uma tarefa armadilhada e explodiu!', bomb: 'Você foi pego por uma explosão.', shuriken: 'Você foi atingido por uma shuriken.', guard: 'Seu protegido morreu e você morreu junto.', swap: 'Você trocou de profissão com um Impostor e foi eliminado.' };
+net.on('died', m => { S.me.alive = false; UI.setAlive(false); closeTaskUi(); S.arrows = []; S.loc = null; buildAbil(); if (DIED[m.by]) return UI.toast(DIED[m.by], 7000); UI.toast(m.by === 'link' ? 'Seu par dos Lovers morreu e a ligação levou você junto. Agora você é um fantasma.' : S.role === 'imp' ? 'Você foi expulso. Continue como fantasma.' : 'Você foi eliminado. Agora você é um fantasma.'); });
 net.on('sab', m => { sfx(m.k === 'lights' ? 'blackout' : 'sabotage'); addShake(8); });
 net.on('sabPart', () => sfx('fixed'));
 net.on('sabEnd', () => { sfx('fixed'); UI.toast('Sistema restaurado.'); });
@@ -133,7 +135,7 @@ net.on('voted', m => { UI.markVoted(m.id); sfx('click'); });
 net.on('chat', m => UI.addChat(m, S.roster));
 net.on('result', m => { S.phase = 'result'; UI.showResult(m, S.roster); });
 net.on('play', () => { S.phase = 'play'; S.hideMe = false; S.view = null; UI.closeMeeting(); go(null); $('hud').classList.remove('hide'); S.players.clear(); S.hideMe = false; sfx('ok'); S._ej = null; buildAbil(); });
-net.on('end', m => { S.phase = 'end'; closeTaskUi(); alarm(false); $('hud').classList.add('hide'); A.mode = null; UI.showEnd(m, S.roster, { team: S.team, job: S.job }); hideBig(); });
+net.on('end', m => { S.phase = 'end'; closeTaskUi(); alarm(false); $('hud').classList.add('hide'); A.mode = null; UI.showEnd(m, S.roster, { team: S.team, job: S.job, id: S.id }); hideBig(); });
 let reconnecting = false;
 async function reconnect() {
   if (reconnecting || S.phase === 'menu') return; const s = JSON.parse(sessionStorage.getItem('quorum.s') || 'null'); if (!s) return toMenu('Conexão encerrada.');
@@ -160,7 +162,7 @@ $('sabMenu').addEventListener('pointerdown', e => { const k = e.target.dataset.s
 
 // ---------- ações contextuais ----------
 function nearAction() {
-  const me = S.me; if (S.phase !== 'play' || me.vent >= 0) return null;
+  const me = S.me; if (S.phase !== 'play' || me.vent >= 0 || S.xt.pc) return null; // possuindo: USAR indisponível
   if (me.alive && S.sab) {
     const k = S.sab.k, fix = (id, pt) => dist(me, pt) < 90 && { label: 'REPARAR', run: () => { S.acting = 1; sfx('click'); setTimeout(() => dist(S.me, pt) < 110 && send({ t: 'fix', id }), 1000); } };
     if (k === 'lights') { const f = fix('lights', SPECIAL.lights); if (f) return f; }
@@ -180,13 +182,14 @@ function startTask(t) {
   closeTask = openTask(t.type, t.name, () => { closeTask = null; setTimeout(() => send({ t: 'taskDone', id: t.id }), Math.max(0, TASK_MIN[t.type] - (Date.now() - t0)) + 80); }, () => { closeTask = null; });
 }
 const doUse = () => nearAction()?.run();
-const bodyNear = () => S.me.alive && S.bodies.some(b => dist(S.me, b) < 150);
+const bodyNear = () => S.me.alive && !S.xt.pc && S.bodies.some(b => dist(S.me, b) < 150);
 const doReport = () => bodyNear() && send({ t: 'report' });
-function killTarget() { let b = null, bd = 95; for (const [id, p] of S.players) if (!p.ghost && !S.mates.has(id) && dist(S.me, p) < bd) { b = id; bd = dist(S.me, p); } return b; }
-const doKill = () => { if (S.role === 'imp' && S.me.alive && !S.cd[0] && killTarget() != null) send({ t: 'kill' }); };
+const canKillNow = () => S.role === 'imp' || (S.job === 'jackpot' && S.xt.jp?.[0] === 'kill' && S.me.alive);
+function killTarget() { let b = null, bd = 95; for (const [id, p] of S.players) if (!p.ghost && id !== S.id && !S.mates.has(id) && dist(S.me, p) < bd) { b = id; bd = dist(S.me, p); } return b; }
+const doKill = () => { if (canKillNow() && S.me.alive && !S.cd[0] && killTarget() != null) send({ t: 'kill' }); };
 const ventNear = () => VENTS.some(v => dist(S.me, v) < 80);
 const canVent = () => S.team === 'imp' || S.job === 'engenheiro';
-function doVent() { if (!canVent() || !S.me.alive) return; if (S.me.vent >= 0) { send({ t: 'vent', a: 'out' }); sfx('vent'); } else if (ventNear()) { send({ t: 'vent', a: 'in' }); sfx('vent'); } }
+function doVent() { if (!canVent() || !S.me.alive || S.xt.pc || S.xt.pd) return; if (S.me.vent >= 0) { send({ t: 'vent', a: 'out' }); sfx('vent'); } else if (ventNear()) { send({ t: 'vent', a: 'in' }); sfx('vent'); } }
 
 // ---------- HUD ----------
 const mini = $('mini'), mc = mini.getContext('2d'), ms = mini.width / WORLD.w;
@@ -211,9 +214,10 @@ function hud(dt) {
   $('mapOff').style.display = sab?.k === 'comms' ? 'flex' : 'none';
   const act = nearAction(), u = $('bUse'); u.disabled = !act || act.off || !!closeTask; u.firstChild.textContent = act ? act.label : 'USAR'; u.classList.toggle('rdy', !!act);
   const rep = $('bRep'); rep.disabled = !bodyNear(); rep.classList.toggle('rdy', bodyNear());
-  if (imp) {
+  const jk = S.job === 'jackpot' && S.xt.jp?.[0] === 'kill' && me.alive; $('bKill').classList.toggle('hide', !(imp || jk));
+  if (imp || jk) {
     const tg = killTarget() != null, k = $('bKill'); k.disabled = !me.alive || S.cd[0] > 0 || !tg; k.classList.toggle('rdy', !k.disabled); k.querySelector('small').textContent = S.cd[0] ? `${S.cd[0]}s` : 'Q';
-    const sbn = $('bSab'); sbn.disabled = !me.alive || !!sab || S.cd[1] > 0; sbn.querySelector('small').textContent = S.cd[1] ? `${S.cd[1]}s` : 'F';
+    if (imp) { const sbn = $('bSab'); sbn.disabled = !me.alive || !!sab || S.cd[1] > 0; sbn.querySelector('small').textContent = S.cd[1] ? `${S.cd[1]}s` : 'F'; }
   }
   $('bNext').classList.toggle('hide', !(me.vent >= 0)); updAbil(me); if (!$('bigmap').classList.contains('hide')) drawBig();
   mc.drawImage(miniBase, 0, 0);
@@ -232,12 +236,12 @@ function update(dt) {
   }
   let ix = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0), iy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
   if (S.joy.x || S.joy.y) { ix = S.joy.x; iy = S.joy.y; }
-  if (closeTask || S.intro > 0 || me.vent >= 0 || S.cams || performance.now() < S.introEnd) ix = iy = 0;
+  if (closeTask || S.intro > 0 || me.vent >= 0 || S.cams || S.xt.pd || performance.now() < S.introEnd) ix = iy = 0; // possuído: sem comandos de movimento
   if (ix || iy) { const a = Math.round(Math.atan2(iy, ix) / (Math.PI / 8)) * (Math.PI / 8); ix = +Math.cos(a).toFixed(2); iy = +Math.sin(a).toFixed(2); } // 16 direções: movimento estável e poucas mensagens
   const key = ix + ',' + iy, nowT = performance.now(); inT -= dt; if (inT <= 0 || (key !== lastIn && ((!ix && !iy) || nowT - lastSendAt > 60))) { send({ t: 'input', x: ix, y: iy }); lastIn = key; lastSendAt = nowT; inT = 0.25; }
   const l = Math.hypot(ix, iy); me.moving = l > 0;
   if (l) {
-    const k = (190 * S.settings.speed * (S.ab?.act?.samrush > 0 ? (S.settings.sam_speed || 1) : 1) * dt) / l, dx = ix * k, dy = iy * k; if (dx) me.face = dx > 0 ? 1 : -1;
+    const k = (190 * S.settings.speed * (S.ab?.act?.samrush > 0 ? (S.settings.sam_speed || 1) : 1) * (S.ab?.mul || 1) * dt) / l, dx = ix * k, dy = iy * k; if (dx) me.face = dx > 0 ? 1 : -1;
     if (!me.alive && !(S.ghostJob === 'phantom')) { me.x = Math.max(20, Math.min(WORLD.w - 20, me.x + dx)); me.y = Math.max(20, Math.min(WORLD.h - 20, me.y + dy)); }
     else { const ph = S.ab?.act?.phase > 0, ok = (x, y) => !frozenHit(x, y) && (ph ? x > 20 && y > 20 && x < WORLD.w - 20 && y < WORLD.h - 20 : canStand(x, y)); if (ok(me.x + dx, me.y)) me.x += dx; if (ok(me.x, me.y + dy)) me.y += dy; }
     if (me.alive && (footT -= dt) <= 0) { sfx('step'); footT = 0.3; }
@@ -253,7 +257,7 @@ const effJob = () => (S.me.alive ? S.job : S.ghostJob);
 const nearP = r => { let b = null, bd = r; for (const p of S.players.values()) if (!p.ghost && dist(S.me, p) < bd) { b = p; bd = dist(S.me, p); } return b; };
 function buildAbil() {
   const box = $('abil'); box.innerHTML = '';
-  (ABIL[effJob()] || []).filter(([id]) => id !== 'lawsave').forEach(([id, label], i) => { const b = document.createElement('button'); b.dataset.id = id; b.dataset.k = i + 1; if (label.length > 8) b.classList.add('long'); b.append(document.createTextNode(label)); const sm = document.createElement('small'); sm.textContent = i + 1; b.append(sm); press(b, () => useAbility(id)); box.append(b); });
+  (ABIL[effJob()] || []).filter(([id]) => id !== 'lawsave' && id !== 'inq').forEach(([id, label], i) => { const b = document.createElement('button'); b.dataset.id = id; b.dataset.k = i + 1; if (label.length > 8) b.classList.add('long'); b.append(document.createTextNode(label)); const sm = document.createElement('small'); sm.textContent = i + 1; b.append(sm); press(b, () => useAbility(id)); box.append(b); });
 }
 function buildMeetAb() {
   const box = $('mAb'); box.innerHTML = '';
@@ -265,7 +269,7 @@ function buildMeetAb() {
     mk('GUARDAR VOTO', () => send({ t: 'ab', a: 'lawsave' }), !can || S.bank >= max);
   }
   if (S.job === 'lovers' && S.me.alive) { const lv = S.lov, info = document.createElement('span'); info.textContent = `💗 Par: ${S.roster.get(S.lover)?.name || '?'}${S.lovFound != null ? ` · impostor: ${S.roster.get(S.lovFound)?.name || '?'}` : ''}`; box.append(info); }
-  for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg' || id === 'lovfind') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; press(b, () => useAbility(id)); box.append(b); }
+  for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg' || id === 'lovfind' || id === 'inq' || id === 'sage') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = id === 'inq' ? `${label} (${S.inqLeft})` : label; if (id === 'inq') b.disabled = !(S.inqLeft > 0) || !S.me.alive; press(b, () => useAbility(id)); box.append(b); }
 }
 function updAbil(me) {
   const ab = S.ab, v = $('bVent'), cv = canVent() && me.alive; v.classList.toggle('hide', !cv);
@@ -288,7 +292,13 @@ function updAbil(me) {
     if (id === 'mdrop') { dis = !(S.xt.carry > 0); txt = S.xt.carry > 0 ? S.xt.carry + 's' : '—'; }
     if (id === 'revive') { dis = cd > 0 || !(ab.us.med > 0) || !(S.xt.carry > 0 || bodyNear()); if (!cd) txt = 'x' + (ab.us.med | 0); }
     if (id === 'lovfind') { const lv = S.lov; dis = !(lv && lv[5] === 1); txt = !lv ? '—' : lv[6] === 1 ? '✓' : lv[5] === 1 ? '!' : '—'; if (lv && lv[6] === 1) dis = false; }
-    if (id === 'cam' && S.job === 'hacker') { dis = !!S.cams || S.sab?.k === 'comms'; txt = dis ? '—' : b.dataset.k; }
+    if (id === 'trap') { const tr = S.xt.tr || []; dis = cd > 0 || !nearStation(110) || tr.length >= S.settings.trap_max; if (!cd) txt = tr.length + '/' + S.settings.trap_max; }
+    if (id === 'poss') { dis = cd > 0 || !!S.xt.pc || !nearP(220); if (S.xt.pc) txt = S.xt.pc[1] + 's'; }
+    if (id === 'clean') { dis = cd > 0 || !bodyNear() || S.xt.cl > 0; if (S.xt.cl > 0) txt = S.xt.cl + 's'; }
+    if (id === 'swap') { dis = cd > 0 || !(ab.us.swp > 0) || !nearP(180); if (!cd) txt = 'x' + (ab.us.swp | 0); }
+    if (id === 'protect') { const pr = S.xt.pr; dis = !(pr && pr[0] < 0); txt = dis ? '✓' : pr[3] + 's'; }
+    if (id === 'jpinfo') txt = { kill: 'ASS', speed: 'VEL', shield: 'ESC' }[S.xt.jp?.[0]] || '—';
+    if (id === 'cam' && (S.job === 'hacker' || S.job === 'seguranca')) { dis = !!S.cams || S.sab?.k === 'comms'; txt = dis ? '—' : b.dataset.k; }
     if (id === 'investigate') dis = dis || !bodyNear(); if (id === 'skill' || id === 'probe') dis = dis || !tg; if (id === 'remoteFix') dis = dis || !S.sab || (S.job === 'hacker' && S.sab.k !== 'comms'); if (id === 'probe') dis = dis || !!S.probe;
     if (id === 'panel') { dis = !(ab.us.panel > 0); txt = 'x' + (ab.us.panel | 0); } if (id === 'infmsg') { dis = !(ab.us.inf > 0); txt = 'x' + (ab.us.inf | 0); }
     if ((id === 'morph' || id === 'invis') && act > 0) { dis = false; txt = act + 's'; } if (id === 'locate' && act > 0) txt = act + 's';
@@ -296,9 +306,18 @@ function updAbil(me) {
   }
 }
 const abilN = i => { const b = $('abil').children[i]; if (b && !b.disabled) useAbility(b.dataset.id); };
+const nearStation = r => STATIONS.find(s => dist(S.me, s) < r);
 function useAbility(id) {
-  const ph = S.phase; if (ph !== 'play' && !((id === 'panel' || id === 'infmsg' || id === 'lovfind') && (ph === 'meet' || ph === 'vote'))) return;
+  const ph = S.phase; if (ph !== 'play' && !((id === 'panel' || id === 'infmsg' || id === 'lovfind' || id === 'inq' || id === 'sage' || id === 'jpinfo') && (ph === 'meet' || ph === 'vote'))) return;
   const all = [...S.roster].map(([i, r]) => ({ id: i, name: r.name, look: r.look, dead: S.deadKnown.has(i) })), others = all.filter(x => x.id !== S.id);
+  if (id === 'inq') return startInq();
+  if (id === 'trap') { const st = nearStation(110); return st ? send({ t: 'ab', a: 'trap', id: st.id }) : UI.toast('Aproxime-se de uma estação de tarefa.'); }
+  if (id === 'poss') { const c = others.filter(o => !S.mates.has(o.id) && S.players.get(o.id) && !S.players.get(o.id).ghost && dist(S.me, S.players.get(o.id)) < 220); return c.length ? UI.pick('Possuir quem?', c, to => send({ t: 'ab', a: 'poss', to })) : UI.toast('Ninguém ao alcance para possuir.'); }
+  if (id === 'swap') { const c = others.filter(o => S.players.get(o.id) && !S.players.get(o.id).ghost && dist(S.me, S.players.get(o.id)) < 180); return c.length ? UI.pick('Trocar de profissão com quem?', c, to => send({ t: 'ab', a: 'swap', to })) : UI.toast('Ninguém ao alcance para trocar.'); }
+  if (id === 'protect') return UI.pick('Proteger quem? (se ele morrer, você morre)', others.filter(o => !o.dead), to => send({ t: 'ab', a: 'protect', to }));
+  if (id === 'bomb') { sfx('click'); return send({ t: 'ab', a: 'bomb', x: S.me.x + S.me.face * 150, y: S.me.y }); }
+  if (id === 'shuriken') { let tg = null, bd = S.settings.nin_range || 450; for (const [i, p] of S.players) if (!p.ghost && i !== S.id && !S.mates.has(i) && dist(S.me, p) < bd) { tg = p; bd = dist(S.me, p); } const ang = tg ? Math.atan2(tg.y - S.me.y, tg.x - S.me.x) : (S.me.face > 0 ? 0 : Math.PI); return send({ t: 'ab', a: 'shuriken', ang }); }
+  if (id === 'sage') { S.sageWant = true; return send({ t: 'ab', a: 'sage' }); }
   if (id === 'freeze') { const sel = S.xt.sel || []; return UI.pickText(`Congelar qual área? (${sel.length}/${S.settings.frz_n})`, FREEZABLE.filter(i => !S.fz.includes(i)).map(i => ({ id: i, label: (sel.includes(i) ? '❄ ' : '') + ROOM_BY_ID[i].name })), room => send({ t: 'ab', a: 'freeze', room })); }
   if (id === 'locate') return UI.pick('Rastrear quem?', others, to => send({ t: 'ab', a: 'locate', to }));
   if (id === 'shield') return UI.pick('Proteger quem?', all, to => send({ t: 'ab', a: 'shield', to }));
@@ -309,6 +328,12 @@ function useAbility(id) {
 function setObj(me) {
   const o = $('hObj'), j = JOB[S.job]; const b = document.createElement('b'); b.textContent = j.name; paintJob(b, j);
   let rest = !me.alive ? ' — fantasma' + (S.ghostJob ? ` (${JOB[S.ghostJob].name})` : '') : S.team === 'imp' ? ' — elimine sem ser descoberto' + (S.job === 'samurai' ? ` · armadura ${S.xt.arm > 0 ? 'PRONTA' : 'usada'}` : S.job === 'dexter' && S.xt.carry > 0 ? ` · carregando saco ${S.xt.carry}s` : '') : S.job === 'joker' ? ' — faça-os votar em você' : S.job === 'execution' ? ` — ejete ${S.roster.get(S.target)?.name || 'o alvo'}` : S.job === 'congelador' ? ` — congeladas ${S.fz.length}/${S.settings.frz_win} · selecionadas ${(S.xt.sel || []).length}/${S.settings.frz_n}` : S.job === 'parinomo' ? (S.xt.hl ? ' — incendeie a nave!' : S.xt.pf && S.xt.pf[0] >= S.xt.pf[1] ? ' — ache o isqueiro' : ` — abastecidos ${S.xt.pf?.[0] ?? 0}/${S.xt.pf?.[1] ?? 0}`) : S.job === 'virus' ? (S.xt.vi && S.xt.vi[0] >= S.xt.vi[1] ? ' — EXPLODA!' : ` — infectados ${S.xt.vi?.[0] ?? 0}/${S.xt.vi?.[1] ?? 0}`) : S.job === 'medico' ? ' — leve corpos à Enfermaria e ressuscite' + (S.xt.carry > 0 ? ` · carregando ${S.xt.carry}s` : '') : S.job === 'lovers' ? ` — termine as tarefas junto de ${S.roster.get(S.lover)?.name || 'seu par'}` : S.team === 'neu' ? '' : ` — suas tarefas ${S.myTasks.filter(t => t.done).length}/${S.myTasks.filter(t => t.done || !S.taskFrozen(t)).length}`;
+  if (S.xt.pd) rest += ' · ⚠ POSSUÍDO: você não controla o personagem';
+  if (S.xt.pc) rest += ` · POSSUINDO ${S.roster.get(S.xt.pc[0])?.name || '?'} (${S.xt.pc[1]}s) — mova e ELIMINE; USAR/REPORTAR/DUTO indisponíveis`;
+  if (S.job === 'sabotador' && S.xt.tr) rest += ` · bombas ativas ${S.xt.tr.length}/${S.settings.trap_max}`;
+  if (S.job === 'faxineiro' && S.xt.cl > 0) rest += ` · limpando… ${S.xt.cl}s (fique perto)`;
+  if (S.job === 'seguranca' && S.xt.pr) rest += S.xt.pr[0] < 0 ? ` · escolha quem proteger (${S.xt.pr[3]}s)` : ` · protegendo ${S.roster.get(S.xt.pr[0])?.name || '?'}${S.xt.pr[1] ? '' : ' (morto)'}${S.xt.pr[2] ? ' · joga com os impostores' : ''}`;
+  if (S.job === 'jackpot' && S.xt.jp) rest += ` · roleta: ${{ kill: 'ASSASSINO', speed: 'VELOCIDADE', shield: 'ESCUDO DO ANJO' }[S.xt.jp[0]] || '?'}`;
   if (S.xt.ph) rest += S.xt.ph[2] ? ' · profissão perdida' : S.xt.ph[0] ? ` · VISÍVEL por ${S.xt.ph[1]}s (evite ser clicado)` : ` · invisível por mais ${S.xt.ph[1]}s`;
   if (S.probe) rest += ` · sondando ${Math.round(S.probe[1] * 100)}%`; { const key = j.name + '|' + rest; if (o._k === key) return; o._k = key; o.textContent = ''; o.append(b, document.createTextNode(rest)); }
 }
@@ -347,8 +372,9 @@ function buildArrows(m, vent) {
   if (vent >= 0 && m.vd) for (const ang of m.vd) out.push({ ang, col: '#ff3b52', s: 0.9 }); // dentro do duto: direção dos outros
   return out;
 }
-function camKey(code) { if (['KeyE', 'Escape', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) send({ t: 'ab', a: 'camOff' }); }
+function camKey(code) { if (/^Digit[0-4]$/.test(code)) { S.camSel = +code.slice(5); return; } if (['KeyE', 'Escape', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) send({ t: 'ab', a: 'camOff' }); }
 $('cExit').onclick = () => send({ t: 'ab', a: 'camOff' });
+document.querySelectorAll('#camUI [data-c]').forEach(b => { b.onclick = () => { S.camSel = +b.dataset.c; sfx('click'); }; });
 net.on('camOff', () => { S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); UI.toast('Câmeras fora do ar.'); });
 // ---------- animação de morte e controles de toque (celular) ----------
 net.on('kanim', m => { const k = m.k != null ? S.roster.get(m.k)?.look : null, v = S.roster.get(m.v)?.look; if (v) UI.killScene(k || null, v, m.r); });
@@ -402,6 +428,39 @@ net.on('shield', m => { UI.toast(`Um Anjo protege você por ${m.dur}s!`, 5000); 
 net.on('infmsg', m => { UI.toast(m.text, 8000); sfx('report'); });
 net.on('ghost', m => { S.ghostJob = m.job; S._ej = null; buildAbil(); UI.toast(`Você recebeu a profissão: ${JOB[m.job].name}.`, 5000); });
 net.on('sup', m => { S.sup = m.left; if (m.fresh) UI.toast('Voto Supremo desbloqueado! Use-o na votação.', 5000); });
+
+// ---------- v2.0: mensagens das novas profissões ----------
+function startInq() { // Inquisidor: alvo → profissão → confirmação (a interface nunca revela a profissão certa)
+  if (!(S.inqLeft > 0)) return UI.toast('Sem tentativas nesta reunião.');
+  const items = [...S.roster].filter(([i]) => i !== S.id && !S.deadKnown.has(i)).map(([i, r]) => ({ id: i, name: r.name, look: r.look }));
+  UI.pick('Quem você quer atacar?', items, to => {
+    const nm = S.roster.get(to)?.name || '?';
+    UI.pickText(`Qual é a profissão de ${nm}?`, JOBS.filter(j => !j.ghost).map(j => ({ id: j.id, label: j.name })).sort((a, b) => a.label.localeCompare(b.label, 'pt')), job =>
+      UI.pickText(`Confirmar: ${nm} é ${JOB[job].name}? Se errar, VOCÊ morre.`, [{ id: 'y', label: '☠ CONFIRMAR' }, { id: 'n', label: 'Cancelar' }], c => { if (c === 'y') send({ t: 'ab', a: 'inq', to, job }); }));
+  });
+}
+net.on('inq', m => { S.inqLeft = m.left; if (S.phase === 'meet' || S.phase === 'vote') buildMeetAb(); });
+net.on('inqfx', m => { UI.inqScene(m, S.roster); });
+net.on('mdead', m => { S.deadKnown.add(m.id); UI.markDead(m.id); if (m.id === S.id) { S.me.alive = false; UI.setAlive(false); } });
+net.on('jobchg', m => { S.job = m.job; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S._ej = null; S.supMode = false; S.xt = {}; buildAbil(); if (S.phase === 'meet' || S.phase === 'vote') buildMeetAb(); UI.toast(`Sua profissão agora é: ${JOB[m.job].name}.`, 7000); sfx('ok'); });
+net.on('matejob', m => { S.known.set(m.id, m.job); });
+net.on('ally', m => { S.mates.add(m.id); S.known.set(m.id, m.job); UI.toast(`🛡 ${S.roster.get(m.id)?.name || '?'} é o Segurança e protege um impostor: ele joga com vocês.`, 9000); sfx('ok'); });
+net.on('prot', m => { S.protId = m.id; UI.toast(`🛡 Você protege ${S.roster.get(m.id)?.name || '?'}${m.ally ? ' — um IMPOSTOR: agora você joga com os impostores!' : '.'} Se ele morrer, você morre.`, 9000); });
+net.on('jproll', m => { S.jpAb = m.ab; UI.roulette(m.ab, !!m.again, m.round); });
+net.on('possOn', m => { UI.toast(`Você possuiu ${S.roster.get(m.id)?.name || '?'} por ${m.dur}s. Mova-se e ELIMINE; USAR/REPORTAR/DUTO ficam indisponíveis.`, 6000); sfx('sabotage'); addShake(6); });
+net.on('possd', () => { UI.toast('⚠ Você foi possuído! Não consegue controlar o seu personagem.', 6000); sfx('blackout'); addShake(10); });
+net.on('possEnd', () => { UI.toast('A possessão terminou.', 3500); sfx('fixed'); });
+net.on('boom', m => { addFx({ k: 'boom', x: m.x, y: m.y, r: m.r, dur: 0.8 }); addShake(Math.max(4, 14 - Math.hypot(m.x - S.me.x, m.y - S.me.y) / 80)); R.flash = Math.max(R.flash, 0.4); sfx('boom'); });
+net.on('bombOn', m => { sfx('tick'); });
+net.on('bombsOff', () => { S.bombs = []; });
+net.on('shur', m => { addFx({ k: 'shur', x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1, h: m.h, dur: 0.4 }); sfx('shur'); });
+net.on('cleaned', m => { fx('dust', m.x, m.y); for (let i = 0; i < 10; i++) fx('dust', m.x + (Math.random() - 0.5) * 40, m.y); S.deadKnown.add(m.id); });
+net.on('sageon', () => { UI.toast('📖 Painel do Sábio desbloqueado: agora ele mostra quais profissões continuam vivas.', 7000); sfx('ok'); });
+function showSage() {
+  const m = S.sage; if (!m) return;
+  UI.pickInfo('Painel do Sábio', [m.unl ? 'Profissões presentes e se ainda têm jogadores vivos:' : 'Profissões presentes na partida (conclua as tarefas para ver quais seguem vivas):', ...m.list.map(r => `${JOB[r[0]]?.name || r[0]}${m.unl ? (r[1] ? ' — VIVA ✔' : ' — sem vivos ✕') : ''}`)], 'sage');
+}
+net.on('sage', m => { S.sage = m; if (S.sageWant || $('pkT').dataset.k === 'sage' && $('pick').classList.contains('on')) { S.sageWant = false; showSage(); } });
 requestAnimationFrame(frame);
 go('menu');
 if (!P.device) go('device');

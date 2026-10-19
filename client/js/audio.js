@@ -36,6 +36,9 @@ const SFX = {
   win: t => [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, t + i * 0.13, 0.35, 'triangle', 0.18)),
   lose: t => [392, 349, 311, 262].forEach((f, i) => tone(f, t + i * 0.25, 0.5, 'sawtooth', 0.12)),
   alarm: t => tone(880, t, 0.22, 'square', 0.08),
+  boom: t => { noise(t, 0.7, 0.7, 300, sfxG, 'lowpass'); tone(110, t, 0.6, 'sawtooth', 0.3, sfxG, 30); tone(60, t, 0.8, 'sine', 0.4, sfxG, 25); },
+  shur: t => { noise(t, 0.12, 0.15, 3500, sfxG, 'highpass'); tone(1400, t, 0.18, 'triangle', 0.08, sfxG, 500); },
+  tick: t => { tone(1000, t, 0.05, 'square', 0.08); tone(1000, t + 0.5, 0.05, 'square', 0.08); },
   report: t => { tone(700, t, 0.15, 'square', 0.15); tone(1000, t + 0.15, 0.3, 'square', 0.15); },
 };
 export function sfx(n) { if (ac && SFX[n]) SFX[n](ac.currentTime + 0.01); }

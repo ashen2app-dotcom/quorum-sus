@@ -4,7 +4,7 @@
 import { STATIONS, SPECIAL, VENTS, ROOMS, TASK_MIN, FREEZABLE, ROOM_BY_ID, roomAt } from '../shared/map.js';
 import { JOB, JOBS, colorTone } from '../shared/jobs.js';
 import { COLOR_NAMES } from '../shared/cosmetics.js';
-import { findPath } from './nav.js';
+import { findPath, los } from './nav.js';
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -79,9 +79,23 @@ export class Bot {
       case 'phlost': this.ghostJob = null; break;
       case 'frozen': this.fz = m.list || []; this.path = null; break;
       case 'end': this.ended = true; break;
+      // ---- v2.0 (todas chegam por mensagens privadas, como num cliente humano) ----
+      case 'jobchg': this.job = m.job; this.target = m.target; this.supLeft = m.sup || 0; this.jp = !!m.jp; this.xt = {}; this.goal = null; this.path = null; break;
+      case 'matejob': this.known.set(m.id, m.job); break;
+      case 'ally': this.mates.add(m.id); this.known.set(m.id, m.job); break;
+      case 'prot': this.prot = m.id; break;
+      case 'jproll': this.jpAb = m.ab; break;
+      case 'inq': this.inqLeft = m.left; break;
+      case 'sage': this.sage = m; break;
+      case 'mdead': this.deadKnown.add(m.id); this.meetDead.add(m.id); this.mtgAlive.delete(m.id); break;
+      case 'inqfx': if (m.k === 'hit') this.sus(m.a, 45, 'inq'); break; // quem acerta a profissão exata de alguém é suspeito
+      case 'possOn': this.pcActive = true; break;
+      case 'possEnd': this.pcActive = false; this.possd = false; break;
+      case 'possd': this.possd = true; break;
     }
   }
   init(m) {
+    Object.assign(this, { prot: m.pr ?? null, jpAb: null, inqLeft: 0, sage: null, pcActive: false, possd: false, bombs: [], deathZones: [], trapAt: -99, swapTry: -99, inqDone: true, inqAt: 0, _inqM: -1, routeSeed: Math.random() * 1000 });
     this.job = m.job; this.team = m.team; this.ghostJob = m.ghostJob; this.target = m.target; this.supLeft = m.sup || 0; this.jp = !!m.jp; this.lover = m.lover ?? null;
     this.mates = new Set(m.mates.map(x => x[0])); for (const [id, j] of m.mates) this.known.set(id, j);
     this.roster = new Map(m.players.map(q => [q.id, q])); this.tasks = m.tasks.map(t => ({ ...t })); this.pos = { x: m.x, y: m.y }; this.gameT0 = this.clock;
@@ -93,7 +107,8 @@ export class Bot {
   onSnap(m) {
     const me = this.p; this.pos = { x: m.you[0], y: m.you[1] }; this.sab = m.sab; this.ec = m.ec | 0; this.tk = m.tk; this.ab = m.ab; this.vr = m.vr == null ? 3000 : m.vr; this.loc = m.loc; this.intro = m.intro;
     if (m.cd) { this.cdKill = m.cd[0]; this.sabCd = m.cd[1]; } this.lastRoom = roomName(this.pos.x, this.pos.y);
-    const cur = new Map(); for (const [id, x, y, face, mv, gh, ap, inv] of m.pl) cur.set(id, { id, x, y, mv: !!mv, ghost: !!gh, ph: gh === 2, ap, inv: !!inv });
+    const cur = new Map(); for (const [id, x, y, face, mv, gh, ap, inv] of m.pl) { if (id === me.id) continue; /* Chuck possuindo vê o próprio corpo parado */ cur.set(id, { id, x, y, mv: !!mv, ghost: !!gh, ph: gh === 2, ap, inv: !!inv }); }
+    { const nb = (m.bm || []).map(([id, x, y, t]) => ({ id, x, y, t })); for (const b of nb) if (!(this.bombs || []).some(o => o.id === b.id)) for (const o of cur.values()) if (!o.ghost && dist(o, b) < 260) this.sus(o.id, 16, 'bomba'); this.bombs = nb; } // quem estava perto de uma bomba nova fica suspeito
     this.xt = m.xt || {}; this.fz = m.fz || [];
     const look = Math.min(this.vr, 420);
     if (me.alive && me.vent < 0 && !this.watching) {
@@ -118,6 +133,7 @@ export class Bot {
   }
   camLedNear() { return [[1500, 650], [980, 930], [2000, 930], [2000, 1530]].some(([x, y]) => dist({ x, y }, this.pos) < 380); }
   onBody(id, x, y, viaCam, info) {
+    (this.deathZones ||= []).push({ x, y, t: this.clock });
     if (info) { if (info.fxk === 1) this.killerJob = JOB.redjohn; else if (info.fxk === 2) this.killerJob = JOB.samurai; if (info.bag) this.deduce(null, 'dexter', 0.7); if (info.g) this.deduce(null, 'vibora', 0.5); }
     const b = { id, x, y, t: this.clock, first: this.clock, rep: false, cam: !!viaCam, vib: !!(info && info.g), reactAt: this.clock + this.c('bot_react') * rnd(0.4, 1.1) }; this.bodies.set(id, b); this.deadKnown.add(id); this.hiddenDead.delete(id);
     for (const [pid, o] of this.seen) if (pid !== id && this.clock - o.t < 12 && dist(o, b) < 380) this.sus(pid, (dist(o, b) < 200 ? 28 : 16) * (this.clock - o.t < 3 ? 1 : 0.6), 'near');
@@ -366,6 +382,7 @@ export class Bot {
   playTick(dt) {
     const p = this.p; if (this.room.intro > 0) return;
     if (this.pendKill && this.clock - this.pendKill.at > 0.3) { const pk = this.pendKill; this.pendKill = null; if (this.cdKill > 5) this.afterKill(pk); }
+    if (this.possd) return; // possuído: não controla o personagem
     if (this.watching) return this.camTick();
     if (p.vent >= 0) return this.ventTick();
     if (this.pause > 0) { this.pause -= dt; this.stop(); return; }
@@ -379,6 +396,7 @@ export class Bot {
   // ---- reações de alta prioridade ----
   react() {
     const p = this.p, imp = this.imp;
+    if (p.alive && this.job !== 'bombardeiro') { const bm = (this.bombs || []).find(b => dist(b, this.pos) < this.c('bmb_r') + 70); if (bm) this.setGoal(this.fleeGoal(bm, 96)); } // foge de bombas à vista
     if (p.alive && this.sab && (!imp || roll(0.01))) { const g = this.fixGoal(); if (g && (!imp || this.sab.k !== 'heat')) this.setGoal(g); }
     if (p.alive) {
       const b = this.nearestBody();
@@ -424,6 +442,7 @@ export class Bot {
   pickGoal() {
     const p = this.p, J = this.eff(); this.lastGoalPick = this.clock;
     if (p.alive && this.team === 'neu') { const g = this.neutralGoal(); if (g) return void this.setGoal(g); }
+    if (p.alive && this.job === 'seguranca' && this.prot != null && !this.deadKnown.has(this.prot) && this.seen.get(this.prot) && this.clock - this.seen.get(this.prot).t < 25 && roll(0.4)) return void this.setGoal({ k: 'follow', id: this.prot, r: 170, pr: 38, until: this.clock + rnd(8, 18) });
     if (p.alive && this.imp) { const g = this.impGoal(); if (g) return void this.setGoal(g); }
     if (p.alive && (J === 'xerife' || J === 'mentalista' || J === 'policial')) { const t = this.topSuspect(id => !this.known.has(id) || JOB[this.known.get(id)].team !== 'inn'); if (t && t.v > 55 && p.alive && roll(0.6)) return void this.setGoal({ k: 'follow', id: t.id, r: 140, pr: 35, until: this.clock + rnd(10, 22) }); }
     const pend = this.tasks.filter(t => !t.done && this.taskOpen(t) && !(this.badGoal.get('task|' + t.id) > this.clock)), task = this.pc('bot_task');
@@ -434,12 +453,14 @@ export class Bot {
   }
   taskOpen(t) { return !this.fz.some(id => ROOM_BY_ID[id]?.name === t.room); }
   aggr() { const a = this.pc('bot_aggr'); return this.job === 'samurai' ? clamp(a + (this.xt.arm > 0 ? 0.18 : -0.18), 0, 1) : a; }
-  chooseTask(pend) { const w = pend.map(t => 1 / (dist(STN[t.id], this.pos) + 250) / (1 + 0.6 * this.crowd(STN[t.id]))); let r = Math.random() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < pend.length; i++) { r -= w[i]; if (r <= 0) return pend[i]; } return pend[0]; }
+  chooseTask(pend) { const dz = (this.deathZones || []).filter(z => this.clock - z.t < 90), w = pend.map(t => { const pref = 0.65 + (Math.abs(Math.sin(this.p.id * 12.9898 + t.id.length * 78.233 + t.id.charCodeAt(t.id.length - 1) * 3.1 + (this.routeSeed || 0))) * 0.7), scary = dz.some(z => dist(z, STN[t.id]) < 420) && this.trait.brave < 1.15 ? 0.3 : 1; return pref * scary / (dist(STN[t.id], this.pos) + 250) / (1 + 0.6 * this.crowd(STN[t.id])); }); let r = Math.random() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < pend.length; i++) { r -= w[i]; if (r <= 0) return pend[i]; } return pend[0]; }
   someoneRecent() { const a = [...this.seen].filter(([id, o]) => this.clock - o.t < 15 && !this.deadKnown.has(id)); return a.length ? pick(a)[0] : null; }
   wanderGoal() { const c = [...CENTERS].sort((a, b) => (this.crowd(a) + Math.random() * 2) - (this.crowd(b) + Math.random() * 2))[0]; return { k: 'wander', x: c.x + rnd(-110, 110), y: c.y + rnd(-90, 90), r: 60, pr: 10 }; }
   neutralGoal() {
     if (this.job === 'execution' && this.target != null && !this.deadKnown.has(this.target)) { const s = this.seen.get(this.target); if (s && roll(0.8)) return { k: 'follow', id: this.target, r: 150, pr: 35, until: this.clock + rnd(12, 25) }; }
     if (this.job === 'parinomo' || this.job === 'virus') { const g = this.fuelVirGoal(); if (g) return g; }
+    if (this.job === 'jackpot' && this.jpAb === 'kill') { const g = this.impGoal(); if (g && g.k !== 'vent') return g; }
+    if (this.job === 'jackpot' && this.danger && this.clock < this.danger.until) return this.fleeGoal(this.danger.from, 85);
     if (this.job === 'joker') { const r = roll(0.5), o = this.someoneRecent(); if (o && r) return { k: 'follow', id: o, r: 90, pr: 35, until: this.clock + rnd(8, 18) }; const b = [...this.bodies.values()][0]; if (b) return { k: 'wander', x: b.x, y: b.y, r: 120, pr: 35 }; }
     return null;
   }
@@ -461,7 +482,7 @@ export class Bot {
     const ready = this.cdKill === 0 && this.clock - this.gameT0 > 14 && this.clock - this.meetEnd > 8, prey = ready ? this.preyCandidate() : null;
     if (prey && roll(0.25 + this.aggr() * 0.7)) return { k: 'hunt', id: prey.id, r: 70, pr: 60, until: this.clock + 14 };
     if (ready && roll(this.aggr() * 0.6)) { const t = this.isolatedTarget(); if (t) return { k: 'seek', x: t.x, y: t.y, r: 120, pr: 45 }; }
-    if (!this.ab.cd.vent && roll(0.05 * this.aggr())) { const v = VENTS.filter(q => dist(q, this.pos) < 500).sort((a, b) => dist(a, this.pos) - dist(b, this.pos))[0]; if (v) return { k: 'vent', x: v.x, y: v.y + 8, r: 50, pr: 55 }; }
+    if (!this.ab.cd.vent && !this.pcActive && this.imp && roll(0.05 * this.aggr())) { const v = VENTS.filter(q => dist(q, this.pos) < 500).sort((a, b) => dist(a, this.pos) - dist(b, this.pos))[0]; if (v) return { k: 'vent', x: v.x, y: v.y + 8, r: 50, pr: 55 }; }
     const pend = this.tasks.filter(t => !t.done && this.taskOpen(t)); if (pend.length && roll(0.6)) { const t = this.chooseTask(pend); return { k: 'task', id: t.id, x: STN[t.id].x, y: STN[t.id].y + 34, r: 50, pr: 40, fake: true }; }
     return null;
   }
@@ -536,6 +557,7 @@ export class Bot {
   doKill(t) { this.act({ t: 'kill' }); this.lastKillAt = this.clock; this.pendKill = { id: t.id, at: this.clock, x: t.x, y: t.y }; }
   afterKill(pk) {
     const wit = this.witnesses(-1), J = this.job; this.stop();
+    if (J === 'faxineiro' && wit === 0 && !(this.ab.cd.clean > 0) && this.nearBody(120)) { this.act({ t: 'ab', a: 'clean' }); this.hold = this.clock + this.c('fax_time') + 0.5; return; }
     if (J === 'espectro' && wit > 0 && !(this.ab.cd.invis > 0) && !(this.ab.act.invis > 0)) this.act({ t: 'ab', a: 'invis' });
     if (J === 'metamorfo' && (wit > 0 || roll(0.4)) && !(this.ab.cd.morph > 0)) { const c = [...this.seen].filter(([id, o]) => !this.mates.has(id) && !this.deadKnown.has(id) && id !== this.p.id && this.clock - o.t < 40 && dist(o, pk) > 500); const to = (c.length ? pick(c) : pick([...this.seen].filter(([id]) => !this.mates.has(id) && !this.deadKnown.has(id))) || [null])[0]; if (to != null) this.act({ t: 'ab', a: 'morph', to }); }
     const v = VENTS.filter(q => dist(q, this.pos) < 230).sort((a, b) => dist(a, this.pos) - dist(b, this.pos))[0];
@@ -564,12 +586,68 @@ export class Bot {
       case 'dexter': this.dexTick(use); break;
       case 'medico': this.medicTick(use); break;
       case 'lovers': this.loversTick(); break;
-      case 'metamorfo': case 'espectro': case 'impostor': case 'vibora': case 'samurai': break;
+      case 'sabotador': this.trapT(use); break;
+      case 'chuck': this.possT(use); break;
+      case 'bombardeiro': this.bombT(use); break;
+      case 'ninja': this.shurT(use); break;
+      case 'faxineiro': this.cleanT(use); break;
+      case 'trocador': this.swapT(use); break;
+      case 'seguranca': this.shootCheck(); this.segT(use); break;
+      case 'sabio': this.sageT(); break;
+      case 'metamorfo': case 'espectro': case 'impostor': case 'vibora': case 'samurai': case 'inquisidor': case 'jackpot': break;
     }
     if (p.alive) this.phClickTick(use);
     if (p.alive && this.imp) this.impSab();
     if (p.alive && this.job === 'espectro' && !(ab.cd.invis > 0) && !(ab.act.invis > 0) && this.cdKill === 0 && roll(use * 0.25)) { const pr = this.preyCandidate(); if (pr && dist(pr, this.pos) < 450) this.act({ t: 'ab', a: 'invis' }); }
   }
+  // ---------- v2.0: novas profissões (só usam o que o bot percebeu por mensagens/snapshots) ----------
+  nearBody(r) { for (const b of this.bodies.values()) if (!b.remote && !b.rep && dist(b, this.pos) < r) return b; return null; }
+  trapT(use) { // Sabotador: arma a tarefa onde está, longe de testemunhas
+    if (!this.p.alive || this.p.vent >= 0 || this.ab.cd.trap > 0 || this.clock - this.trapAt < 6 || this.clock - this.gameT0 < 15 || !roll(0.25 + use * 0.5)) return;
+    const st = Object.values(STN).find(q => dist(q, this.pos) < 100); if (!st || this.witnesses(-1) > 0) return;
+    this.trapAt = this.clock; this.act({ t: 'ab', a: 'trap', id: st.id });
+  }
+  possT(use) { // Chuck: possui alguém próximo quando há outra vítima por perto e o ataque está quase pronto
+    if (!this.p.alive || this.p.vent >= 0 || this.pcActive || this.ab.cd.poss > 0 || this.cdKill > 6 || this.clock - this.gameT0 < 14 || !roll(0.25 + use * 0.4)) return;
+    const prey = [...this.vis.values()].filter(o => !o.ghost && !this.mates.has(o.id)), near = prey.filter(o => dist(o, this.pos) < 200).sort((a, b) => dist(a, this.pos) - dist(b, this.pos))[0];
+    if (near && prey.length >= 2) this.act({ t: 'ab', a: 'poss', to: near.id });
+  }
+  bombT(use) { // Bombardeiro: joga a bomba onde há alguém perto e foge (o dono é imune)
+    if (!this.p.alive || this.p.vent >= 0 || this.ab.cd.bomb > 0 || this.clock - this.gameT0 < 14 || !roll(0.12 + this.aggr() * 0.35 + use * 0.1)) return;
+    const R = this.c('bmb_r'), tg = [...this.vis.values()].filter(o => !o.ghost && !this.mates.has(o.id) && dist(o, this.pos) < 230), grp = tg.filter(o => tg.some(q => q !== o && dist(q, o) < R * 0.8));
+    const t = (grp[0] || (roll(0.4) ? tg[0] : null)); if (!t || this.witnesses(t.id) > 3) return;
+    this.act({ t: 'ab', a: 'bomb', x: t.x, y: t.y }); this.setGoal(this.fleeGoal(t, 87));
+  }
+  shurT(use) { // Ninja: shuriken em alvo visível, alcançável em linha reta e sem testemunhas demais
+    if (!this.p.alive || this.p.vent >= 0 || this.ab.cd.shuriken > 0 || this.clock - this.gameT0 < 14 || !roll(0.2 + this.aggr() * 0.4)) return;
+    const R = this.c('nin_range') * 0.9, o = this.nearVis(R, q => !this.mates.has(q.id) && dist(q, this.pos) > KILL_R + 10 && los(this.pos.x, this.pos.y, q.x, q.y)); if (!o || this.witnesses(o.id) > (roll(0.2) ? 1 : 0)) return;
+    this.act({ t: 'ab', a: 'shuriken', ang: Math.atan2(o.y - this.pos.y, o.x - this.pos.x) }); if (roll(0.6)) this.setGoal(this.fleeGoal(o, 86));
+  }
+  cleanT(use) { // Faxineiro: limpa corpos próprios/alheios quando ninguém olha
+    if (!this.p.alive || this.p.vent >= 0 || this.ab.cd.clean > 0 || this.xt.cl > 0 || !roll(0.5 + use * 0.4)) return;
+    const b = this.nearBody(110); if (b && this.witnesses(-1) === 0) { this.act({ t: 'ab', a: 'clean' }); this.hold = this.clock + this.c('fax_time') + 0.5; }
+  }
+  swapT(use) { // Trocador: troca com alguém que NÃO parece impostor (trocar com impostor mata)
+    if (!this.p.alive || this.p.vent >= 0 || this.ab.cd.swap > 0 || !(this.ab.us.swp > 0) || this.clock - this.gameT0 < 25 || this.clock - this.swapTry < 20 || !roll(use * 0.15)) return;
+    const o = this.nearVis(160, q => (this.susp.get(q.id) ?? 20) < 45 && !(this.known.has(q.id) && JOB[this.known.get(q.id)].team === 'imp')); this.swapTry = this.clock;
+    if (o) this.act({ t: 'ab', a: 'swap', to: o.id });
+  }
+  segT(use) { // Segurança: escolhe o protegido (se o host mandou escolher) e olha as câmeras de qualquer lugar
+    if (!this.p.alive) return;
+    if (this.prot == null && this.xt.pr && this.xt.pr[0] < 0 && this.clock - this.gameT0 > 3) { const c = [...this.roster.keys()].filter(i => i !== this.p.id && !this.deadKnown.has(i)).sort((a, b) => (this.susp.get(a) ?? 20) - (this.susp.get(b) ?? 20)); if (c.length) { this.prot = c[0]; this.act({ t: 'ab', a: 'protect', to: c[0] }); } }
+    if (!this.watching && !this.sab && this.room.phase === 'play' && this.p.vent < 0 && roll(use * 0.04)) { this.act({ t: 'ab', a: 'cam' }); this.watching = true; this.watchUntil = this.clock + rnd(5, 9); }
+  }
+  sageT() { if (this.sage?.unl && this.xt === this.xt) { /* o painel é empurrado pelo servidor a cada mudança; nada a pedir */ } }
+  inqGuess() { // Inquisidor: só arrisca com informação legítima (revelação, painel ou alegação de alguém)
+    if (!this.p.alive || !(this.inqLeft > 0)) return;
+    const alive = [...this.mtgAlive].filter(i => i !== this.p.id && !this.deadKnown.has(i) && !this.mates.has(i));
+    const sure = alive.find(i => this.known.has(i) && !JOB[this.known.get(i)].ghost && this.known.get(i) !== 'impostor');
+    if (sure) return void this.act({ t: 'ab', a: 'inq', to: sure, job: this.known.get(sure) }); // profissão revelada por uma habilidade: acerto garantido
+    const cl = alive.filter(i => this.claims.has(i) && !this.liars.has(i)); if (!cl.length) return;
+    const risk = 0.15 + (1 - this.trust(cl[0])) * 0.2; // alegações costumam ser verdadeiras; só arrisca se estiver com pouca vida ou muito agressivo
+    if (alive.length <= 3 || roll(this.aggr() * 0.5 - risk)) { const t = cl[Math.floor(Math.random() * cl.length)]; this.act({ t: 'ab', a: 'inq', to: t, job: this.claims.get(t).job }); }
+  }
+  trust(id) { return this.trusted.has(id) ? 0.9 : 0.55; }
   // ---------- v1.0: habilidades das novas profissões (usam só informação que o bot recebeu) ----------
   nearVis(r, pred = () => true) { let best = null, bd = r; for (const o of this.vis.values()) { if (o.ghost || !pred(o)) continue; const d = dist(o, this.pos); if (d < bd) { best = o; bd = d; } } return best; }
   rjCheck(use) {
@@ -653,6 +731,8 @@ export class Bot {
   // ================= reuniões: chat e voto =================
   meetTick() {
     const p = this.p, t = this.clock - this.mtgStart;
+    if (this.mtgStart !== this._inqM) { this._inqM = this.mtgStart; this.inqDone = false; this.inqAt = rnd(7, 14); }
+    if (p.alive && this.job === 'inquisidor' && !this.inqDone && t > this.inqAt && this.phase !== 'result') { this.inqDone = true; this.inqGuess(); }
     if (p.alive) {
       if (!this.panelDone && t > 1.2) { this.panelDone = true; this.meetAbilities(); }
       while (this.chatQ.length && this.clock > this.chatQ[0].at + 25) this.chatQ.shift();

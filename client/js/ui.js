@@ -4,7 +4,7 @@ import { COLORS, COLOR_NAMES, HATS, OUTFITS, ACCS, MASCOTS, SKINS } from '/share
 export const TAKEN = new Set(); // cores ocupadas por outros jogadores (atualizado pelo lobby)
 const UI_TOAST = m => toast(m);
 import { sfx, setVol, A } from './audio.js';
-import { JOBS, JOB, PARAMS, BOT_PARAMS, TEAMS, SETTING_LIMITS, paintJob } from '/shared/jobs.js';
+import { JOBS, JOB, JOB_PARAMS, PARAMS, BOT_PARAMS, TEAMS, SETTING_LIMITS, paintJob } from '/shared/jobs.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
@@ -83,7 +83,8 @@ export function openMeeting(m, ctx) {
   for (const [id, p] of ctx.roster) {
     const dead = !m.alive.includes(id), card = el('div', 'card2' + (dead ? ' dead' : '')), cv = el('canvas'); cv.width = 100; cv.height = 124;
     drawCrew(cv.getContext('2d'), p.look, 50, 118, { s: 1.4, ghost: dead, alpha: dead ? 0.6 : 1, dead });
-    card.append(cv, el('div', 'nm', p.name), el('div', 'vs')); if (ctx.mates && ctx.mates.has(id) && id !== ctx.me) card.append(el('span', 'chip ally', 'ALIADO')); if (m.off && m.off.includes(id)) card.append(el('span', 'chip off', 'OFFLINE')); else if (m.gone && m.gone.includes(id)) card.append(el('span', 'chip off', 'SAIU'));
+    const nmEl = el('div', 'nm', p.name); if (ctx.mates && ctx.mates.has(id) && ctx.known?.has(id)) paintJob(nmEl, JOB[ctx.known.get(id)]); // impostores veem o nome colorido dos aliados (só deles)
+    card.append(cv, nmEl, el('div', 'vs')); if (ctx.mates && ctx.mates.has(id) && id !== ctx.me) card.append(el('span', 'chip ally', 'ALIADO')); if (m.off && m.off.includes(id)) card.append(el('span', 'chip off', 'OFFLINE')); else if (m.gone && m.gone.includes(id)) card.append(el('span', 'chip off', 'SAIU'));
     card.onclick = () => { if (M.phase !== 'vote' || dead || card.classList.contains('dead') || M.voted || !M.ctx.alive) return; M.sel = id; M.cards.forEach(c => c.classList.remove('sel')); card.classList.add('sel'); $('mVote').disabled = false; sfx('click'); };
     M.cards.set(id, card); list.append(card);
   }
@@ -128,10 +129,9 @@ export function closeMeeting() { clearInterval(M.iv); cancelAnimationFrame(ejRaf
 
 // ---------- profissões (configuração do host) ----------
 let jtab = 'inn';
-const INLINE = { chuck: ['chk_dur', 'chk_cd'], bombardeiro: ['bmb_r', 'bmb_fuse', 'bmb_cd', 'bmb_max'], jackpot: ['jp_w_kill', 'jp_w_speed', 'jp_w_shield'], inquisidor: ['inq_tries'], sabotador: ['trap_max', 'trap_cd', 'trap_r'], ninja: ['nin_speed', 'nin_killcd', 'nin_range', 'nin_scd'], faxineiro: ['fax_time', 'fax_cd'], trocador: ['swp_cd', 'swp_uses'], seguranca: ['seg_mode'] };
 export function renderJobs(L, myId, send) {
   const host = L.host === myId, tabs = $('jTabs'), body = $('jBody'); tabs.innerHTML = ''; body.innerHTML = ''; if (!host && jtab === 'bots') jtab = 'inn';
-  for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['rules', '⚙ Regras'], ['bots', '🤖 Bots']].filter(([k]) => k !== 'bots' || host)) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
+  for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['bots', '🤖 Bots']].filter(([k]) => k !== 'bots' || host)) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
   const slider = (label, k, min, max, step, fmt) => { const w = el('div', 'set'), b = el('b', null, fmt(L.settings[k])); w.append(el('span', null, label), b); const r = el('input'); r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = L.settings[k]; r.disabled = !host; r.oninput = () => b.textContent = fmt(+r.value); r.onchange = () => send({ t: 'set', k, v: +r.value }); w.append(r); return w; };
   if (jtab === 'bots') {
     const g = el('div', 'jrow'); g.style.gridColumn = '1/3';
@@ -142,16 +142,17 @@ export function renderJobs(L, myId, send) {
     let last = ''; for (const p of BOT_PARAMS) { if (p.k === 'bot_on' || p.k === 'bot_n') continue; if (p.grp !== last) { body.append(el('div', 'jgrp', p.grp.toUpperCase())); last = p.grp; } const r = el('div', 'jrow'); r.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); body.append(r); }
     return;
   }
-  if (jtab === 'rules') {
-    const g = el('div', 'jrow'); g.style.gridColumn = '1/3'; g.append(el('small', null, 'Quantidade de neutros e de impostores. Impostores em “Auto” segue 1/2/3 por tamanho da sala.'), slider('Neutros na partida', 'neutrals', 0, 4, 1, v => v), slider('Impostores (0 = Auto)', 'impostors', 0, 3, 1, v => v || 'Auto')); body.append(g);
-    let last = ''; for (const p of PARAMS) { if (p.grp !== last) { body.append(el('div', 'jgrp', p.grp.toUpperCase())); last = p.grp; } const r = el('div', 'jrow'); r.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); body.append(r); }
-    return;
+  if (jtab === 'neu' || jtab === 'imp') { // quantidade de neutros/impostores ficam na própria página da equipe
+    const g = el('div', 'jrow'); g.style.gridColumn = '1/3';
+    if (jtab === 'neu') g.append(el('small', null, 'Quantos neutros entram na partida.'), slider('Neutros na partida', 'neutrals', 0, 4, 1, v => v));
+    else g.append(el('small', null, 'Impostores em “Auto” segue 1/2/3 por tamanho da sala.'), slider('Impostores (0 = Auto)', 'impostors', 0, 3, 1, v => v || 'Auto'));
+    body.append(g);
   }
   for (const j of JOBS.filter(x => x.team === jtab)) {
     const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); paintJob(nm, j);
     row.append(nm, el('small', null, j.desc + (j.ghost ? ' (só recebida após morrer)' : '')), slider(j.ghost ? 'Chance ao morrer' : 'Chance de aparecer', 'w_' + j.id, 0, 100, 5, v => v + '%'));
     if (j.id !== 'tripulante') row.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v));
-    for (const k of INLINE[j.id] || []) { const p = PARAMS.find(q => q.k === k); if (p) row.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); } // v2.0: ajustes principais direto no cartão da profissão
+    for (const k of JOB_PARAMS[j.id] || []) { const p = PARAMS.find(q => q.k === k); if (p) row.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); } // recargas, limites e regras de cada profissão ficam no cartão dela
     body.append(row);
   }
 }
@@ -176,7 +177,7 @@ export function pickText(title, opts, cb) {
 
 // ---------- fim ----------
 const WIN = { crew: ['EQUIPE VENCEU', '#2de2c5', 'rgba(20,90,80,.8)'], imp: ['IMPOSTORES VENCERAM', '#ff4f6d', 'rgba(110,15,40,.8)'], joker: ['JOKER VENCEU', '#c3c9d6', 'rgba(70,74,90,.85)'], exec: ['EXECUTION VENCEU', '#ff8a1f', 'rgba(120,60,10,.85)'],
-  congelador: ['CONGELADOR VENCEU', '#7DF9FF', 'rgba(20,80,100,.85)'], parinomo: ['PARINOMO VENCEU', '#FFA500', 'rgba(120,60,0,.85)'], virus: ['VÍRUS VENCEU', '#22A447', 'rgba(10,70,30,.85)'], phantom: ['PHANTOM VENCEU', '#FFFFFF', 'rgba(70,74,90,.85)'] };
+  jackpot: ['JACKPOT VENCEU', '#3ddc5a', 'rgba(15,80,30,.85)'], congelador: ['CONGELADOR VENCEU', '#7DF9FF', 'rgba(20,80,100,.85)'], parinomo: ['PARINOMO VENCEU', '#FFA500', 'rgba(120,60,0,.85)'], virus: ['VÍRUS VENCEU', '#22A447', 'rgba(10,70,30,.85)'], phantom: ['PHANTOM VENCEU', '#FFFFFF', 'rgba(70,74,90,.85)'] };
 export function showEnd(m, roster, me) {
   const [title, col, bg] = WIN[m.winner] || WIN.crew, t = $('eTitle'); t.textContent = title; t.style.color = col; t.style.textShadow = `0 0 40px ${col}`;
   $('eReason').textContent = m.reason; const l = $('eList'); l.innerHTML = '';

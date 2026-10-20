@@ -157,14 +157,14 @@ function drawFrozen(c, r, t, label) { c.fillStyle = 'rgba(170,235,255,.5)'; c.fi
 function drawSelected(c, r, t, label) { c.setLineDash([16, 10]); c.lineDashOffset = -t * 20; c.strokeStyle = '#7DF9FF'; c.lineWidth = 5; c.strokeRect(r.x + 6, r.y + 6, r.w - 12, r.h - 12); c.setLineDash([]); c.fillStyle = 'rgba(125,249,255,.12)'; c.fillRect(r.x, r.y, r.w, r.h); c.fillStyle = '#7DF9FF'; c.font = '800 22px "Baloo 2",sans-serif'; c.textAlign = 'center'; c.fillText('selecionada: ' + label, r.x + r.w / 2, r.y + 34); }
 function drawLighter(c, x, y, t) { const p = 0.5 + 0.5 * Math.sin(t * 6); c.fillStyle = `rgba(255,170,40,${0.2 + p * 0.25})`; c.beginPath(); c.arc(x, y, 26 + p * 6, 0, TAU); c.fill(); c.fillStyle = '#c9ccd6'; rr(c, x - 7, y - 4, 14, 20, 3); c.fill(); c.fillStyle = '#7a8094'; c.fillRect(x - 7, y + 4, 14, 3); c.fillStyle = '#ffb347'; c.beginPath(); c.ellipse(x, y - 9, 3.5, 6 + p * 2, 0, 0, TAU); c.fill(); c.fillStyle = '#fff3a0'; c.beginPath(); c.ellipse(x, y - 8, 1.6, 3, 0, 0, TAU); c.fill(); }
 // ---------- v2.0 ----------
-function drawBomb(c, b, t, r) {
-  const k = Math.max(0, Math.min(1, b.t / 4)), blink = Math.sin(t * (6 + (1 - k) * 22)) > 0;
-  c.strokeStyle = `rgba(255,${blink ? 90 : 160},40,${0.25 + 0.2 * (1 - k)})`; c.lineWidth = 3; c.setLineDash([10, 8]); c.beginPath(); c.arc(b.x, b.y, r, 0, TAU); c.stroke(); c.setLineDash([]);
+function drawBomb(c, b, t, r) { // bomba arremessada: voa em arco até o ponto de queda e explode ao tocar o chão
+  const k = b.T > 0 ? Math.max(0, Math.min(1, 1 - b.t / b.T)) : 1, x = b.x0 + (b.x - b.x0) * k, gy = b.y0 + (b.y - b.y0) * k, h = Math.sin(k * Math.PI) * 70, y = gy - h;
+  c.strokeStyle = `rgba(255,${Math.sin(t * 20) > 0 ? 90 : 160},40,0.45)`; c.lineWidth = 3; c.setLineDash([10, 8]); c.beginPath(); c.arc(b.x, b.y, r, 0, TAU); c.stroke(); c.setLineDash([]); // onde vai cair e até onde pega
   c.fillStyle = 'rgba(255,120,30,.08)'; c.beginPath(); c.arc(b.x, b.y, r, 0, TAU); c.fill();
-  c.fillStyle = 'rgba(0,0,0,.35)'; c.beginPath(); c.ellipse(b.x, b.y + 8, 16, 6, 0, 0, TAU); c.fill(); c.fillStyle = '#20243a'; c.beginPath(); c.arc(b.x, b.y - 6, 14, 0, TAU); c.fill(); c.strokeStyle = '#8a93ad'; c.lineWidth = 2; c.stroke();
-  c.strokeStyle = '#c9a36b'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(b.x + 6, b.y - 18); c.quadraticCurveTo(b.x + 14, b.y - 28, b.x + 8, b.y - 32); c.stroke(); c.fillStyle = blink ? '#ffdf6b' : '#ff6a1f'; c.beginPath(); c.arc(b.x + 8, b.y - 33, 3.5, 0, TAU); c.fill();
-  c.fillStyle = '#fff'; c.font = '800 15px "Baloo 2",sans-serif'; c.textAlign = 'center'; c.strokeStyle = 'rgba(5,8,20,.9)'; c.lineWidth = 3; c.strokeText(Math.max(0, b.t).toFixed(1), b.x, b.y - 42); c.fillText(Math.max(0, b.t).toFixed(1), b.x, b.y - 42);
+  c.fillStyle = 'rgba(0,0,0,.35)'; c.beginPath(); c.ellipse(x, gy + 6, 14 - h * 0.08, 5, 0, 0, TAU); c.fill();
+  c.save(); c.translate(x, y - 8); c.rotate(k * 14); c.fillStyle = '#20243a'; c.beginPath(); c.arc(0, 0, 13, 0, TAU); c.fill(); c.strokeStyle = '#8a93ad'; c.lineWidth = 2; c.stroke(); c.fillStyle = '#ff6a1f'; c.beginPath(); c.arc(6, -13, 3.5, 0, TAU); c.fill(); c.restore();
 }
+function drawShur(c, h, t) { c.save(); c.translate(h.x, h.y - 20); c.rotate(t * 28); c.fillStyle = '#dfe6f2'; c.strokeStyle = 'rgba(120,140,190,.9)'; c.lineWidth = 1.5; c.beginPath(); for (let i = 0; i < 8; i++) { const r = i % 2 ? 4 : 12, a = i * Math.PI / 4; c.lineTo(Math.cos(a) * r, Math.sin(a) * r); } c.closePath(); c.fill(); c.stroke(); c.restore(); c.strokeStyle = 'rgba(220,230,255,.35)'; c.lineWidth = 2; c.beginPath(); c.moveTo(h.x, h.y - 20); c.lineTo(h.x - Math.cos(h.a) * 40, h.y - 20 - Math.sin(h.a) * 40); c.stroke(); }
 function drawTrapMark(c, x, y, t) { c.fillStyle = `rgba(255,60,60,${0.55 + 0.3 * Math.sin(t * 5)})`; c.beginPath(); c.arc(x, y - 52, 9, 0, TAU); c.fill(); c.fillStyle = '#fff'; c.font = '800 12px sans-serif'; c.textAlign = 'center'; c.fillText('💣', x, y - 48); }
 function drawFx2(c, f) {
   const k = f.t / f.dur;
@@ -264,6 +264,7 @@ export function render(S, dt) {
   for (let i = R.dying.length - 1; i >= 0; i--) { const d = R.dying[i]; d.t += dt; if (d.t > 0.7) { R.dying.splice(i, 1); continue; } const k3 = d.t / 0.7; ctx.save(); ctx.translate(d.x, d.y - 20); ctx.rotate(k3 * 9); ctx.globalAlpha = 1 - k3; drawCrew(ctx, d.look, 0, 20, { t, s: 1 - k3 * 0.7 }); ctx.restore(); }
   // v2.0: bombas, armadilhas (só quem instalou vê), efeitos de explosão/shuriken
   for (const b of S.bombs || []) if (vis(b.x - 80, b.y - 80, 160, 160)) drawBomb(ctx, b, t, S.settings.bmb_r || 160);
+  for (const h of S.shurs || []) drawShur(ctx, h, t);
   for (const id of S.xt?.tr || []) { const st = STATIONS.find(q => q.id === id); if (st && vis(st.x - 40, st.y - 50, 80, 80)) drawTrapMark(ctx, st.x, st.y, t); }
   for (let i = R.fxs.length - 1; i >= 0; i--) { const f = R.fxs[i]; f.t += dt; if (f.t > f.dur) { R.fxs.splice(i, 1); continue; } drawFx2(ctx, f); }
   // partículas

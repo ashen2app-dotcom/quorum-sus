@@ -20,7 +20,7 @@ const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new S
 S.taskFrozen = t => { const s = STATIONS.find(q => q.id === t.id); return !!s && S.fz.some(id => ROOM_BY_ID[id]?.name === s.room); };
 const frozenHit = (x, y) => { for (const id of S.fz) { const r = ROOM_BY_ID[id]; if (r && x + 12 > r.x && x - 12 < r.x + r.w && y + 12 > r.y && y - 12 < r.y + r.h) return true; } return false; };
 const send = o => net.send(o);
-Object.assign(S, { deadKnown: new Set(), meetPos: null, meetBody: null, emergCd: 0, bombs: [], protId: -1, camSel: 0, inqLeft: 0, sageWant: false, jpAb: null });
+Object.assign(S, { deadKnown: new Set(), meetPos: null, meetBody: null, emergCd: 0, bombs: [], shurs: [], protId: -1, camSel: 0, inqLeft: 0, sageWant: false, jpAb: null });
 initRender($('game'));
 
 // ---------- navegação ----------
@@ -76,7 +76,7 @@ net.on('lobby', m => {
   UI.renderLobby(m, S.id, send, m.min);
 });
 function begin(m, resume) {
-  S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t })); S.xt = {}; S.lover = m.lover ?? null; S.lov = null; S.lovFound = null; S.fz = []; S.bank = 0; S.spend = 0; S.voted = false; S.bombs = []; S.protId = m.pr ?? -1; S.camSel = 0; S.inqLeft = 0; S.jpAb = null; S.sageWant = false;
+  S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t })); S.xt = {}; S.lover = m.lover ?? null; S.lov = null; S.lovFound = null; S.fz = []; S.bank = 0; S.spend = 0; S.voted = false; S.bombs = []; S.shurs = []; S.protId = m.pr ?? -1; S.camSel = 0; S.inqLeft = 0; S.jpAb = null; S.sageWant = false;
   Object.assign(S.me, { x: m.x, y: m.y, alive: m.alive !== false, vent: -1, moving: false }); S.players.clear(); S.bodies = []; S.deadKnown = new Set(); S.sab = null; S.emergUsed = m.emergUsed || 0; S.settings = m.settings;
   const mine = S.roster.get(S.id); S.look = mine.look; S.name = mine.name; S.hideMe = false; S.vr = 420; R.cam.x = m.x; R.cam.y = m.y; R.vis = 420;
   go(null); $('hud').classList.remove('hide'); $('sabMenu').classList.add('hide');
@@ -115,7 +115,7 @@ net.on('snap', m => {
   for (const id of [...S.players.keys()]) if (!seen.has(id)) S.players.delete(id);
   S.bodies = m.bd.map(([id, bx, by, bg, bfx, bbag, bmc]) => ({ id, x: bx, y: by, g: !!bg, fx: bfx | 0, bag: bbag | 0, mc: bmc | 0, look: (S.roster.get(id) || { look: P.look }).look })); for (const b of S.bodies) S.deadKnown.add(b.id);
   const hadSab = S.sab; S.sab = m.sab; S.vr = m.vr; S.cd = m.cd || [0, 0]; S.tk = m.tk; S.emergCd = m.ec | 0; S.intro = m.intro; S.ab = m.ab; S.loc = m.loc; S.probe = m.probe; S.sup = m.ab.sup;
-  S.bombs = (m.bm || []).map(([id, x, y, t]) => ({ id, x, y, t })); S.xt = m.xt || {}; S.lov = S.xt.lv || null; { const nf = m.fz || []; if (nf.length !== S.fz.length) { S.fz = nf; hudTasks(); } } S.cams = m.cams || null; S.camsOn = !!m.co; $('hud').classList.toggle('incam', !!m.cams); $('camUI').classList.toggle('hide', !m.cams);
+  S.bombs = (m.bm || []).map(([id, x0, y0, x, y, t, T]) => ({ id, x0, y0, x, y, t, T })); S.shurs = (m.sh || []).map(([id, x, y, a]) => ({ id, x, y, a: a / 100 })); S.xt = m.xt || {}; S.lov = S.xt.lv || null; { const nf = m.fz || []; if (nf.length !== S.fz.length) { S.fz = nf; hudTasks(); } } S.cams = m.cams || null; S.camsOn = !!m.co; $('hud').classList.toggle('incam', !!m.cams); $('camUI').classList.toggle('hide', !m.cams);
   S.arrows = buildArrows(m, vent);
   if (!!hadSab !== !!S.sab || hadSab?.k !== S.sab?.k) alarm(S.sab?.k === 'heat');
 });
@@ -128,7 +128,7 @@ net.on('sabPart', () => sfx('fixed'));
 net.on('sabEnd', () => { sfx('fixed'); UI.toast('Sistema restaurado.'); });
 net.on('meeting', m => {
   S.phase = 'meet'; S.voted = false; S.spend = 0; closeTaskUi(); alarm(false); S.sab = null; S.bodies = []; $('hud').classList.add('hide'); $('intro').classList.remove('on'); sfx(m.reason === 'body' ? 'report' : 'meeting'); addShake(6);
-  UI.openMeeting(m, { roster: S.roster, alive: S.me.alive, mates: S.team === 'imp' ? S.mates : null, me: S.id }); S.arrows = []; S.loc = null; S.supMode = false; S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); $('mSup').hidden = true; hideBig(); buildMeetAb();
+  UI.openMeeting(m, { roster: S.roster, alive: S.me.alive, mates: S.team === 'imp' ? S.mates : null, known: S.team === 'imp' ? S.known : null, me: S.id }); S.arrows = []; S.loc = null; S.supMode = false; S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); $('mSup').hidden = true; hideBig(); buildMeetAb();
 });
 net.on('phase', m => { S.phase = 'vote'; buildMeetAb(); UI.startVote(m.time); sfx('vote'); $('mSup').hidden = !(S.sup > 0 && S.me.alive); $('mSup').classList.remove('main'); });
 net.on('voted', m => { UI.markVoted(m.id); sfx('click'); });
@@ -315,7 +315,7 @@ function useAbility(id) {
   if (id === 'poss') { const c = others.filter(o => !S.mates.has(o.id) && S.players.get(o.id) && !S.players.get(o.id).ghost && dist(S.me, S.players.get(o.id)) < 220); return c.length ? UI.pick('Possuir quem?', c, to => send({ t: 'ab', a: 'poss', to })) : UI.toast('Ninguém ao alcance para possuir.'); }
   if (id === 'swap') { const c = others.filter(o => S.players.get(o.id) && !S.players.get(o.id).ghost && dist(S.me, S.players.get(o.id)) < 180); return c.length ? UI.pick('Trocar de profissão com quem?', c, to => send({ t: 'ab', a: 'swap', to })) : UI.toast('Ninguém ao alcance para trocar.'); }
   if (id === 'protect') return UI.pick('Proteger quem? (se ele morrer, você morre)', others.filter(o => !o.dead), to => send({ t: 'ab', a: 'protect', to }));
-  if (id === 'bomb') { sfx('click'); return send({ t: 'ab', a: 'bomb', x: S.me.x + S.me.face * 150, y: S.me.y }); }
+  if (id === 'bomb') { const R0 = S.settings.bmb_range || 320; let tg = null, bd = R0; for (const [i, p] of S.players) if (!p.ghost && i !== S.id && !S.mates.has(i) && dist(S.me, p) < bd) { tg = p; bd = dist(S.me, p); } return send({ t: 'ab', a: 'bomb', x: tg ? tg.x : S.me.x + S.me.face * R0 * 0.7, y: tg ? tg.y : S.me.y }); } // arremessa na direção do alvo mais próximo (ou para a frente)
   if (id === 'shuriken') { let tg = null, bd = S.settings.nin_range || 450; for (const [i, p] of S.players) if (!p.ghost && i !== S.id && !S.mates.has(i) && dist(S.me, p) < bd) { tg = p; bd = dist(S.me, p); } const ang = tg ? Math.atan2(tg.y - S.me.y, tg.x - S.me.x) : (S.me.face > 0 ? 0 : Math.PI); return send({ t: 'ab', a: 'shuriken', ang }); }
   if (id === 'sage') { S.sageWant = true; return send({ t: 'ab', a: 'sage' }); }
   if (id === 'freeze') { const sel = S.xt.sel || []; return UI.pickText(`Congelar qual área? (${sel.length}/${S.settings.frz_n})`, FREEZABLE.filter(i => !S.fz.includes(i)).map(i => ({ id: i, label: (sel.includes(i) ? '❄ ' : '') + ROOM_BY_ID[i].name })), room => send({ t: 'ab', a: 'freeze', room })); }
@@ -451,9 +451,9 @@ net.on('possOn', m => { UI.toast(`Você possuiu ${S.roster.get(m.id)?.name || '?
 net.on('possd', () => { UI.toast('⚠ Você foi possuído! Não consegue controlar o seu personagem.', 6000); sfx('blackout'); addShake(10); });
 net.on('possEnd', () => { UI.toast('A possessão terminou.', 3500); sfx('fixed'); });
 net.on('boom', m => { addFx({ k: 'boom', x: m.x, y: m.y, r: m.r, dur: 0.8 }); addShake(Math.max(4, 14 - Math.hypot(m.x - S.me.x, m.y - S.me.y) / 80)); R.flash = Math.max(R.flash, 0.4); sfx('boom'); });
-net.on('bombOn', m => { sfx('tick'); });
+net.on('bombOn', () => { sfx('shur'); });
 net.on('bombsOff', () => { S.bombs = []; });
-net.on('shur', m => { addFx({ k: 'shur', x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1, h: m.h, dur: 0.4 }); sfx('shur'); });
+net.on('shur', () => { sfx('shur'); });
 net.on('cleaned', m => { fx('dust', m.x, m.y); for (let i = 0; i < 10; i++) fx('dust', m.x + (Math.random() - 0.5) * 40, m.y); S.deadKnown.add(m.id); });
 net.on('sageon', () => { UI.toast('📖 Painel do Sábio desbloqueado: agora ele mostra quais profissões continuam vivas.', 7000); sfx('ok'); });
 function showSage() {

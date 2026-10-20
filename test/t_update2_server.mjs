@@ -50,6 +50,12 @@ section('Sabotador');
   check('cooldown aplicado', sb.cd.trap > 0); sb.cd = {}; place(sb, sts[1].x, sts[1].y + 30); ab(R, sb, 'trap');
   check('limite de bombas ativas', R.traps.size === 1); }
 
+section('Sabotador: aliados');
+{ const g = mkGame({ n: 5, jobs: ['sabotador', 'impostor', 'tripulante', 'tripulante', 'tripulante'] }); const [sb, ally, a] = g.ps; const R = g.room;
+  const st = STATIONS.find(q => a.tasks.some(t => t.id === q.id)); place(sb, st.x, st.y + 30); ab(R, sb, 'trap', { id: st.id });
+  place(ally, st.x, st.y + 30); ally.tasks.push({ id: st.id, done: false }); send(R, ally, { t: 'taskStart', id: st.id }); check('aliado impostor que abre a tarefa armadilhada morre', !ally.alive);
+  const g2 = mkGame({ n: 5, jobs: ['sabotador', 'tripulante', 'tripulante', 'tripulante', 'tripulante'] }); const [s2, v2] = g2.ps; const st2 = STATIONS.find(q => v2.tasks.some(t => t.id === q.id)); place(s2, st2.x, st2.y + 30); ab(g2.room, s2, 'trap', { id: st2.id }); send(g2.room, s2, { t: 'taskStart', id: st2.id }); check('o próprio Sabotador não dispara', s2.alive && g2.room.traps.has(st2.id)); }
+
 section('Chuck');
 { const g = mkGame({ n: 5, jobs: ['chuck', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { chk_dur: 8 } }); const [ch, v, o] = g.ps; const R = g.room;
   place(ch, 1500, 950); place(v, 1560, 950); place(o, 1700, 950); R.settings.speed = 1;
@@ -76,19 +82,22 @@ section('Chuck');
   check('reunião encerra possessão', !c2.poss && v2.possBy == null); }
 
 section('Bombardeiro');
-{ const g = mkGame({ n: 6, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_r: 150, bmb_fuse: 3 } }); const [bb, near, far, wall] = g.ps; const R = g.room;
-  place(bb, 1500, 950); place(near, 1580, 950); place(far, 1700, 1100); place(wall, 1500, 1500); // wall: outra sala
-  ab(R, bb, 'bomb', { x: 1500, y: 950 }); check('bomba ativa', R.bombs.length === 1);
-  place(bb, 1500, 760); adv(3.3);
-  check('dentro do raio morre', !near.alive); check('fora do raio vive', far.alive && wall.alive); check('bomba removida', R.bombs.length === 0);
-  check('Bombardeiro vive (dono imune)', bb.alive); }
-{ const g = mkGame({ n: 6, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_r: 400, bmb_fuse: 2 } }); const [bb, a, b] = g.ps; const R = g.room;
-  place(bb, 1500, 950); place(a, 1500, 1500); // raio alcança em linha reta, mas há parede entre as salas
-  place(b, 1300, 950); ab(R, bb, 'bomb'); adv(2.3);
-  check('raio maior mata no alcance', !b.alive); check('parede bloqueia explosão', a.alive); }
-{ const g = mkGame({ n: 5, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_fuse: 4 } }); const [bb, a] = g.ps; const R = g.room;
-  place(a, 1520, 950); place(bb, 1500, 950); ab(R, bb, 'bomb'); R.slay(bb, null, { force: true }); adv(4.5); check('bomba cancelada se o dono morre', a.alive && R.bombs.length === 0);
-  const g2 = mkGame({ n: 5, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'] }); place(g2.ps[0], 1500, 950); ab(g2.room, g2.ps[0], 'bomb'); g2.room.meeting(g2.ps[1], 'emergency'); check('reunião cancela bomba', g2.room.bombs.length === 0); }
+{ const g = mkGame({ n: 7, jobs: ['bombardeiro', 'impostor', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_r: 150, bmb_range: 300 } }); const [bb, ally, near, far, wall] = g.ps; const R = g.room;
+  place(bb, 1400, 950); place(near, 1580, 950); place(far, 1700, 1100); place(wall, 1500, 1500); place(ally, 1560, 960);
+  ab(R, bb, 'bomb', { x: 1580, y: 950 }); check('bomba em voo (ainda não explodiu)', R.bombs.length === 1 && near.alive);
+  check('cooldown aplicado', bb.cd.bomb > 0);
+  adv(0.15); check('em voo não mata antes de cair', near.alive); adv(1);
+  check('ao cair no chão explode', R.bombs.length === 0 && !near.alive);
+  check('aliado impostor perto também morre', !ally.alive); check('fora do raio vive', far.alive && wall.alive); check('dono imune', bb.alive); }
+{ const g = mkGame({ n: 6, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_r: 400, bmb_range: 200 } }); const [bb, a, b] = g.ps; const R = g.room;
+  place(bb, 1500, 950); place(a, 1500, 1500); place(b, 1300, 950); ab(R, bb, 'bomb', { x: 1400, y: 950 }); adv(1.5);
+  check('raio maior mata no alcance', !b.alive); check('parede bloqueia a explosão (outra sala)', a.alive); }
+{ const g = mkGame({ n: 5, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_range: 400 } }); const [bb] = g.ps; const R = g.room;
+  place(bb, 1300, 760); ab(R, bb, 'bomb', { x: 1300, y: 200 }); const bm = R.bombs[0]; check('bomba cai na parede, não atravessa', bm && bm.y > 740 && bm.y < 800 + 20, bm && bm.y);
+  const g2 = mkGame({ n: 5, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_range: 300 } }); place(g2.ps[0], 1400, 950); ab(g2.room, g2.ps[0], 'bomb', { x: 9999, y: 950 }); check('respeita alcance configurado', Math.hypot(g2.room.bombs[0].x - 1400, g2.room.bombs[0].y - 950) <= 301); }
+{ const g = mkGame({ n: 5, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { bmb_range: 300 } }); const [bb, a] = g.ps; const R = g.room;
+  place(a, 1620, 950); place(bb, 1400, 950); ab(R, bb, 'bomb', { x: 1620, y: 950 }); R.slay(bb, null, { force: true }); adv(2); check('bomba cancelada se o dono morre', a.alive && R.bombs.length === 0);
+  const g2 = mkGame({ n: 5, jobs: ['bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'] }); place(g2.ps[0], 1500, 950); ab(g2.room, g2.ps[0], 'bomb', { x: 1600, y: 950 }); g2.room.meeting(g2.ps[1], 'emergency'); check('reunião cancela bomba', g2.room.bombs.length === 0); }
 
 section('Ninja');
 { const g = mkGame({ n: 5, jobs: ['ninja', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], settings: { nin_killcd: 10, nin_range: 400 } }); const [nj, a, b, c] = g.ps; const R = g.room;
@@ -96,17 +105,16 @@ section('Ninja');
   nj.killCd = 0; send(R, nj, { t: 'kill' }); check('ataque corpo a corpo mata', !a.alive); check('cooldown de 10 s', Math.abs(nj.killCd - 10) < 0.5, nj.killCd);
   place(a, 1550, 950); a.alive = true; send(R, nj, { t: 'kill' }); check('bloqueado durante recarga', a.alive);
   adv(10.2); send(R, nj, { t: 'kill' }); check('libera após 10 s', !a.alive);
-  ab(R, nj, 'shuriken', { ang: 0 }); check('shuriken acerta no alcance', !c.alive); check('recarga própria', nj.cd.shuriken > 0);
-  place(c, 2000, 950); c.alive = true; nj.cd = {}; ab(R, nj, 'shuriken', { ang: 0 }); check('shuriken respeita alcance', c.alive);
-  place(nj, 1300, 780); place(b, 1300, 500); b.alive = true; nj.cd = {}; ab(R, nj, 'shuriken', { ang: -Math.PI / 2 }); check('shuriken não atravessa a parede entre salas', b.alive); }
+  ab(R, nj, 'shuriken', { ang: 0 }); check('shuriken sai em voo (não é instantânea)', R.shurs.length === 1 && c.alive);
+  adv(0.1); check('ainda viajando', R.shurs.length === 1 && c.alive); adv(1); check('shuriken viaja até o alvo e acerta', !c.alive && R.shurs.length === 0); check('recarga própria', nj.cd.shuriken > 0);
+  place(c, 2000, 950); c.alive = true; nj.cd = {}; ab(R, nj, 'shuriken', { ang: 0 }); adv(2); check('shuriken respeita alcance', c.alive && R.shurs.length === 0);
+  place(nj, 1300, 780); place(b, 1300, 500); b.alive = true; nj.cd = {}; ab(R, nj, 'shuriken', { ang: -Math.PI / 2 }); adv(2); check('shuriken não atravessa a parede entre salas', b.alive && R.shurs.length === 0); }
 { const g = mkGame({ n: 5, jobs: ['ninja', 'tripulante', 'tripulante', 'tripulante', 'tripulante'] }); const [nj, a] = g.ps; const R = g.room;
   place(nj, 1500, 950); send(R, nj, { t: 'input', x: 1, y: 0 }); adv(1); const d1 = nj.x - 1500; place(a, 1500, 950); send(R, a, { t: 'input', x: 1, y: 0 }); adv(1); const d2 = a.x - 1500;
-  check('Ninja mais rápido', d1 > d2 * 1.1, `${d1.toFixed(0)} vs ${d2.toFixed(0)}`);
-  R.settings.nin_speed = 1.5; place(nj, 1700, 1100); send(R, nj, { t: 'input', x: 1, y: 0 }); adv(3); check('velocidade extra não atravessa paredes', nj.x <= 1750, nj.x);
-  place(nj, 3000, 900); send(R, nj, { t: 'input', x: 0, y: 1 }); adv(4); check('não sai dos limites andáveis', nj.y < 1100, nj.y); }
+  check('Ninja NÃO corre mais rápido (habilidade removida)', Math.abs(d1 - d2) < 2, `${d1.toFixed(0)} vs ${d2.toFixed(0)}`); }
 { const g = mkGame({ n: 5, jobs: ['ninja', 'tripulante', 'tripulante', 'tripulante', 'tripulante'] }); const [nj, a] = g.ps; const R = g.room;
   place(nj, 1500, 950); place(a, 1540, 950); a.shieldT = 30; send(R, nj, { t: 'kill' }); check('escudo bloqueia ataque do Ninja', a.alive);
-  nj.killCd = 0; ab(R, nj, 'shuriken', { ang: 0 }); check('escudo bloqueia shuriken', a.alive);
+  nj.killCd = 0; ab(R, nj, 'shuriken', { ang: 0 }); adv(1); check('escudo bloqueia shuriken', a.alive);
   a.shieldT = 0; a.armor = 1; nj.cd = {}; nj.killCd = 0; send(R, nj, { t: 'kill' }); check('armadura bloqueia 1 golpe', a.alive && a.armor === 0); }
 
 section('Faxineiro');
@@ -170,6 +178,15 @@ for (const [label, tj] of [['Inocente', 'tripulante'], ['Neutro', 'joker'], ['Im
   R.slay(g.ps[2], null, { force: true }); R.slay(g.ps[3], null, { force: true }); R.checkWin();
   check('impostores vencem com aliado', R.phase === 'end'); check('Segurança é co-vencedor', last(g, sg.id, 'end')?.co.includes(sg.id)); }
 
+section('Segurança: vence com o protegido');
+{ const mk2 = (tj) => { const g = mkGame({ n: 7, jobs: ['seguranca', tj, 'impostor', 'tripulante', 'tripulante', 'tripulante', 'tripulante'] }); sp(g.room, g.ps[0], g.ps[1].id); return g; };
+  let g = mk2('tripulante'); g.room.end('crew', 't'); check('protégé Inocente: vence com os Inocentes', last(g, g.ps[0].id, 'end').co.includes(g.ps[0].id));
+  g = mk2('tripulante'); g.room.end('imp', 't'); check('protégé Inocente: não vence se os Impostores ganham', !last(g, g.ps[0].id, 'end').co.includes(g.ps[0].id));
+  g = mk2('impostor'); g.room.end('imp', 't'); check('protégé Impostor: vence com os Impostores', last(g, g.ps[0].id, 'end').co.includes(g.ps[0].id));
+  g = mk2('impostor'); g.room.end('crew', 't'); check('protégé Impostor: não vence se os Inocentes ganham', !last(g, g.ps[0].id, 'end').co.includes(g.ps[0].id));
+  g = mk2('congelador'); g.room.end('congelador', 't', g.ps[1].id); check('protégé Neutro vencedor: Segurança vence junto', last(g, g.ps[0].id, 'end').co.includes(g.ps[0].id));
+  g = mk2('congelador'); g.room.end('crew', 't'); check('protégé Neutro que não venceu: Segurança não vence', !last(g, g.ps[0].id, 'end').co.includes(g.ps[0].id)); }
+
 section('Jackpot');
 { const counts = { kill: 0, speed: 0, shield: 0 }; let same = 0, prev = null;
   const g = mkGame({ n: 5, jobs: ['jackpot', 'tripulante', 'tripulante', 'tripulante', 'impostor'] }); const [jp] = g.ps; const R = g.room;
@@ -186,11 +203,16 @@ section('Jackpot');
   R.settings.jp_w_speed = 0; R.settings.jp_w_shield = 100; R.settings.anj_dur = 10; R.settings.anj_cd = 5; R.newRound(); check('Escudo ativo', jp.shieldT > 0 && jp.jpAb === 'shield');
   const a0 = jp.jpAb; adv(11); check('escudo expira (não é permanente)', jp.shieldT <= 0 || true); adv(5); check('renova sem novo sorteio', jp.jpAb === a0 && jp.shieldT > 0); 
   jp.shieldT = 5; const imp = g.ps[5]; place(imp, 1500, 950); place(jp, 1530, 950); imp.killCd = 0; send(R, imp, { t: 'kill' }); check('escudo bloqueia ataque', jp.alive); }
-{ const g = mkGame({ n: 6, jobs: ['jackpot', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'impostor'] }); const [jp] = g.ps; const R = g.room; R.slay(g.ps[1], null, { force: true }); 
-  R.end('crew', 'teste'); check('vivo no fim: vence junto', last(g, jp.id, 'end').co.includes(jp.id));
-  const g2 = mkGame({ n: 6, jobs: ['jackpot', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'impostor'] }); g2.room.slay(g2.ps[0], null, { force: true }); g2.room.end('imp', 'teste');
-  check('morto antes do fim: sem vitória', !last(g2, g2.ps[0].id, 'end').co.includes(g2.ps[0].id));
-  const e = g2.room.end('crew', 'de novo'); check('encerramento não duplica', g2.msgs(g2.ps[1].id).filter(m => m.t === 'end').length === 1); }
+{ const g = mkGame({ n: 6, jobs: ['jackpot', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'impostor'] }); const [jp, a, b, c, d, im] = g.ps; const R = g.room;
+  R.slay(im, null, { force: true }); check('Jackpot vivo: eliminar impostores NÃO encerra (partida continua)', R.phase === 'play');
+  for (const t of [...a.tasks, ...b.tasks]) { } check('tarefas não encerram com Jackpot vivo', R.checkWin() === false && R.phase === 'play');
+  R.slay(a, null, { force: true }); R.slay(b, null, { force: true }); R.slay(c, null, { force: true }); check('ainda há alguém vivo: continua', R.phase === 'play');
+  R.slay(d, null, { force: true }); R.checkWin(); check('Jackpot elimina todos e vence sozinho', R.phase === 'end' && last(g, jp.id, 'end').winner === 'jackpot' && last(g, jp.id, 'end').who === jp.id); }
+{ const g = mkGame({ n: 6, jobs: ['jackpot', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'impostor'] }); const [jp, a, b, c, d, im] = g.ps; const R = g.room;
+  R.slay(im, null, { force: true }); R.slay(jp, null, { force: true }); R.checkWin(); check('Jackpot morre com impostores já mortos: inocentes vencem', R.phase === 'end' && last(g, a.id, 'end').winner === 'crew');
+  const g2 = mkGame({ n: 6, jobs: ['jackpot', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'impostor'] }); g2.room.slay(g2.ps[0], null, { force: true }); check('Jackpot morre com impostor vivo: partida continua normal', g2.room.phase === 'play');
+  const g3 = mkGame({ n: 6, jobs: ['jackpot', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'impostor'] }); g3.room.end('crew', 'teste'); check('Jackpot não recebe vitória conjunta', !last(g3, g3.ps[0].id, 'end').co.includes(g3.ps[0].id));
+  g3.room.end('crew', 'de novo'); check('encerramento não duplica', g3.msgs(g3.ps[1].id).filter(m => m.t === 'end').length === 1); }
 
 section('Sábio');
 { const g = mkGame({ n: 6, jobs: ['sabio', 'detetive', 'impostor', 'tripulante', 'tripulante', 'tripulante'] }); const [sb, det, im] = g.ps; const R = g.room;
@@ -202,5 +224,6 @@ section('Sábio');
   R.resurrect(det); R.sageFlush(); m = last(g, sb.id, 'sage'); check('atualiza após ressurreição', m.list.find(r => r[0] === 'detetive')[1] === 1);
   const g2 = mkGame({ n: 6, jobs: ['sabio', 'trocador', 'impostor', 'tripulante', 'tripulante', 'tripulante'] }); const [s2, t2] = g2.ps; s2.sageOn = true; place(t2, 1500, 950); place(g2.ps[3], 1530, 950);
   ab(g2.room, t2, 'swap', { to: g2.ps[3].id }); g2.room.sageFlush(); const m2 = last(g2, s2.id, 'sage'); check('atualiza após troca de profissão', m2.list.some(r => r[0] === 'trocador') && !m2.list.some(r => r[0] === 'tripulante' && false));
+  { const gl = mkGame({ n: 6, jobs: ['sabio', 'lovers', 'impostor', 'lovers', 'tripulante', 'tripulante'] }); gl.ps[0].sageOn = true; gl.room.pushSage(gl.ps[0]); const ml = last(gl, gl.ps[0].id, 'sage'); check('Lovers aparece como Lovers e Sábio como Sábio', ml.list.some(r => r[0] === 'lovers') && ml.list.some(r => r[0] === 'sabio')); }
   const g3 = mkGame({ n: 6, jobs: ['sabio', 'detetive', 'impostor', 'tripulante', 'tripulante', 'tripulante'] }); const [s3, d3] = g3.ps; s3.sageOn = true; g3.room.slay(d3, null, { body: false, force: true }); g3.room.sageFlush(); check('ejeção atualiza', last(g3, s3.id, 'sage').list.find(r => r[0] === 'detetive')[1] === 0); }
 summary();

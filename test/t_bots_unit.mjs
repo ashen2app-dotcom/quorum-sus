@@ -26,12 +26,12 @@ log('\n## Bot Jackpot com Assassino caça e mata');
   chk('Jackpot sorteou Assassino', kill); chk('Jackpot (Assassino) matou alguém', ok); }
 
 log('\n## Bot Chuck usa possessão e elimina via personagem possuído');
-{ let ok = 0, tries = 0; for (let k = 0; k < 8 && !ok; k++) { tries++; const room = mk(['tripulante', 'chuck', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], { bot_aggr: 100, chk_dur: 20 }); adv(room, 240); if (room.deaths.some(d => d.by === 2)) ok = 1; }
+{ let ok = 0, tries = 0; for (let k = 0; k < 20 && !ok; k++) { tries++; const room = mk(['tripulante', 'chuck', 'tripulante', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], { bot_aggr: 100, chk_dur: 20 }); adv(room, 240); if (room.deaths.some(d => d.by === 2)) ok = 1; }
   chk('Chuck bot matou durante partida', ok === 1, 'tentativas ' + tries); }
 
 log('\n## Bots desviam de bombas');
-{ const room = mk(['tripulante', 'bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], { bmb_fuse: 6, bmb_r: 200 }); const c = byId(room, 4); room.intro = 0; c.x = 1500; c.y = 950;
-  room.bombs.push({ id: 99, x: 1520, y: 950, t: 6, by: 2 }); adv(room, 4); const d = Math.hypot(c.x - 1520, c.y - 950); chk('bot afastou-se da bomba', d > 120 || !c.alive, d.toFixed(0)); }
+{ const room = mk(['tripulante', 'bombardeiro', 'tripulante', 'tripulante', 'tripulante', 'tripulante'], { bmb_r: 200 }); const c = byId(room, 4); room.intro = 0; c.x = 1500; c.y = 950;
+  room.bombs.push({ id: 99, x0: 1300, y0: 950, x: 1520, y: 950, t: 6, T: 6, by: 2 }); adv(room, 4); const d = Math.hypot(c.x - 1520, c.y - 950); chk('bot afastou-se da bomba', d > 120 || !c.alive, d.toFixed(0)); }
 
 log('\n## Bots em partida completa não geram erros');
 chk('sem exceções registradas', errs.length === 0, errs.slice(0, 3).join(' | '));

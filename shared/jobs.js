@@ -42,14 +42,14 @@ export const JOBS = [
   { ...j('lovers', 'Lovers', 'inn', '#ff7ac8', 'Dois jogadores ligados: se um morre o outro morre junto. Quando os dois terminam as tarefas, descobrem um impostor vivo.', 40, 1), pair: true },
   // ---- v2.0 ----
   j('inquisidor', 'Inquisidor', 'imp', '#ff2a2a', 'Impostor: nas reuniões, escolhe um jogador e adivinha a profissão. Acertou, o alvo morre; errou, o Inquisidor morre.', 40, 1),
-  j('sabotador', 'Sabotador', 'imp', '#ff2a2a', 'Impostor: instala bombas escondidas em tarefas. Quem abrir a tarefa armadilhada explode.', 40, 1),
+  j('sabotador', 'Sabotador', 'imp', '#ff2a2a', 'Impostor: instala bombas escondidas em tarefas. Quem abrir a tarefa armadilhada morre (aliados também, menos ele).', 40, 1),
   { ...j('chuck', 'Chuck', 'imp', '#4aa8ff', 'Impostor: possui outro jogador e controla o personagem dele por alguns segundos (a vítima não consegue se mover).', 40, 1), color2: '#ff2a2a' },
-  j('bombardeiro', 'Bombardeiro', 'imp', '#ff8a1f', 'Impostor: lança uma bomba que explode depois de alguns segundos e mata quem estiver no raio.', 40, 1),
-  j('ninja', 'Ninja', 'imp', '#dc143c', 'Impostor: mais rápido, ataque corpo a corpo com recarga curta e shurikens à distância.', 40, 1),
+  j('bombardeiro', 'Bombardeiro', 'imp', '#ff8a1f', 'Impostor: arremessa uma bomba; ao cair no chão ela explode e mata todos no raio (aliados impostores também).', 40, 1),
+  j('ninja', 'Ninja', 'imp', '#dc143c', 'Impostor: ataque corpo a corpo com recarga curta e shurikens que viajam até o alvo.', 40, 1),
   j('faxineiro', 'Faxineiro', 'imp', '#ff2a2a', 'Impostor: mata normalmente e limpa corpos, que somem do mapa e não podem ser reportados.', 40, 1),
   j('trocador', 'Trocador', 'neu', '#aab0bd', 'Troca de profissão com outro jogador vivo. Se trocar com um Impostor, morre logo depois da troca.', 40, 1),
-  j('seguranca', 'Segurança', 'neu', '#2f7bff', 'Protege um jogador (de qualquer equipe): se o protegido morrer por qualquer motivo, o Segurança morre. Atira como o Xerife e vê as câmeras de qualquer lugar.', 40, 1),
-  j('jackpot', 'Jackpot', 'neu', '#3ddc5a', 'A cada rodada uma roleta sorteia: Assassino, Velocidade ou Escudo do Anjo. Vence se estiver vivo no fim da partida.', 40, 1),
+  j('seguranca', 'Segurança', 'neu', '#2f7bff', 'Protege um jogador (de qualquer equipe): se o protegido morrer por qualquer motivo, o Segurança morre. Vence junto com o time do protegido (inocente, impostor ou o neutro que vencer). Atira como o Xerife e vê as câmeras de qualquer lugar.', 40, 1),
+  j('jackpot', 'Jackpot', 'neu', '#3ddc5a', 'Vence sozinho matando todos. A cada rodada uma roleta sorteia: Assassino, Velocidade ou Escudo do Anjo. Enquanto vive, os inocentes não vencem; se morrer, a partida segue normal.', 40, 1),
   j('sabio', 'Sábio', 'inn', '#3c8dff', 'Consulta as profissões presentes na partida e, ao concluir as tarefas, vê quais ainda têm jogadores vivos.', 40, 1),
 ];
 export const JOB = Object.fromEntries(JOBS.map(x => [x.id, x]));
@@ -81,10 +81,9 @@ const PARAMS_RAW = [
   // ---- v2.0 ----
   P('inq_tries', 'Inquisidor: tentativas por reunião', 1, 3, 1, 1, 'Inquisidor'),
   P('trap_max', 'Sabotador: bombas ativas ao mesmo tempo', 1, 4, 1, 2, 'Sabotador'), P('trap_cd', 'Sabotador: recarga para instalar (s)', 5, 120, 5, 30, 'Sabotador'), P('trap_r', 'Sabotador: raio da explosão em volta da tarefa (0 = só quem abriu)', 0, 250, 10, 100, 'Sabotador'),
-  P('bomb_ff', 'Bombas (Sabotador/Bombardeiro): atingem aliados impostores? (0 = não)', 0, 1, 1, 0, 'Sabotador'),
   P('chk_dur', 'Chuck: duração da possessão (s)', 5, 60, 1, 15, 'Chuck'), P('chk_cd', 'Chuck: recarga da possessão (s)', 10, 180, 5, 45, 'Chuck'),
-  P('bmb_r', 'Bombardeiro: raio da explosão (px)', 60, 400, 10, 160, 'Bombardeiro'), P('bmb_fuse', 'Bombardeiro: tempo até explodir (s)', 2, 10, 1, 4, 'Bombardeiro'), P('bmb_cd', 'Bombardeiro: recarga (s)', 10, 120, 5, 35, 'Bombardeiro'), P('bmb_max', 'Bombardeiro: bombas ativas ao mesmo tempo', 1, 3, 1, 1, 'Bombardeiro'),
-  P('nin_speed', 'Ninja: velocidade (x)', 1, 1.5, 0.05, 1.15, 'Ninja'), P('nin_killcd', 'Ninja: recarga do ataque corpo a corpo (s)', 3, 30, 1, 10, 'Ninja'), P('nin_range', 'Ninja: alcance da shuriken (px)', 150, 900, 50, 450, 'Ninja'), P('nin_scd', 'Ninja: recarga da shuriken (s)', 5, 90, 1, 20, 'Ninja'),
+  P('bmb_r', 'Bombardeiro: raio da explosão (px)', 60, 400, 10, 160, 'Bombardeiro'), P('bmb_range', 'Bombardeiro: alcance do arremesso (px)', 150, 500, 10, 320, 'Bombardeiro'), P('bmb_cd', 'Bombardeiro: recarga (s)', 10, 120, 5, 35, 'Bombardeiro'),
+  P('nin_killcd', 'Ninja: recarga do ataque corpo a corpo (s)', 3, 30, 1, 10, 'Ninja'), P('nin_range', 'Ninja: alcance da shuriken (px)', 150, 900, 50, 450, 'Ninja'), P('nin_shspeed', 'Ninja: velocidade de voo da shuriken (px/s)', 300, 1200, 50, 650, 'Ninja'), P('nin_scd', 'Ninja: recarga da shuriken (s)', 5, 90, 1, 20, 'Ninja'),
   P('fax_time', 'Faxineiro: duração da limpeza (s)', 2, 15, 1, 5, 'Faxineiro'), P('fax_cd', 'Faxineiro: recarga da limpeza (s)', 5, 90, 1, 20, 'Faxineiro'),
   P('swp_cd', 'Trocador: recarga da troca (s)', 5, 120, 5, 30, 'Trocador'), P('swp_uses', 'Trocador: trocas por partida', 1, 3, 1, 1, 'Trocador'),
   P('seg_mode', 'Segurança: protegido (0 = sorteado, 1 = o próprio Segurança escolhe)', 0, 1, 1, 0, 'Segurança'),
@@ -131,3 +130,7 @@ export function paintJob(el, j) {
   if (j && j.color2) { el.style.background = `linear-gradient(90deg,${j.color},${j.color2})`; el.style.webkitBackgroundClip = 'text'; el.style.backgroundClip = 'text'; el.style.webkitTextFillColor = 'transparent'; el.style.color = 'transparent'; }
   else el.style.color = !j ? '' : j.color === '#111419' ? '#e9f1ff' : j.color;
 }
+
+// v2.0: parâmetros exibidos na página de cada profissão (nada de aba "Regras": tudo fica no cartão da profissão)
+const EXTRA = { mentalista: ['jui_uses', 'xer_cd', 'cie_uses', 'loc_cd', 'loc_dur'], redjohn: ['zoom_dur', 'zoom_cd'], seguranca: ['xer_cd', 'seg_mode'], jackpot: ['jp_w_kill', 'jp_w_speed', 'jp_w_shield', 'anj_dur', 'anj_cd'], sabotador: [], xerife: [] };
+export const JOB_PARAMS = Object.fromEntries(JOBS.map(x => [x.id, [...new Set([...PARAMS.filter(p => p.grp === x.name).map(p => p.k), ...(EXTRA[x.id] || [])])]]));

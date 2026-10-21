@@ -66,6 +66,7 @@ export const VENTS = [
 export const SPECIAL = {
   spawn: { x: 1500, y: 950 }, emergency: { x: 1500, y: 880 },
   lights: { x: 1030, y: 1650 }, comms: { x: 2500, y: 1600 },
+  trainPc: { x: 1380, y: 1070 }, // v2.0: computador do modo Treinamento (Sala Central)
   heatA: { x: 550, y: 1620 }, heatB: { x: 2500, y: 1060 }, camConsole: { x: 2500, y: 490 },
 };
 export function walkable(x, y) {

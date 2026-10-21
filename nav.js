@@ -50,6 +50,6 @@ export function findPath(x0, y0, x1, y1, blk) {
   const pts = cells.map(c => ({ x: (c % GW) * C + C / 2, y: ((c / GW) | 0) * C + C / 2 }));
   if (canStand(x1, y1, 14)) pts[pts.length - 1] = { x: x1, y: y1 };
   const out = []; let a = { x: x0, y: y0 }, i = 0;
-  while (i < pts.length) { let j = pts.length - 1; while (j > i && !los(a.x, a.y, pts[j].x, pts[j].y)) j--; out.push(pts[j]); a = pts[j]; i = j + 1; }
+  while (i < pts.length) { let j = Math.min(pts.length - 1, i + 16); while (j > i && !los(a.x, a.y, pts[j].x, pts[j].y)) j--; out.push(pts[j]); a = pts[j]; i = j + 1; }
   return out;
 }

@@ -45,6 +45,7 @@ export class Bot {
   act(m) { this.room.handle(this.p, m); }
   input(x, y) { const k = x.toFixed(1) + ',' + y.toFixed(1); if (k === this.lastIn) return; this.lastIn = k; this.act({ t: 'input', x, y }); }
   stop() { this.input(0, 0); }
+  trainGo(st) { if (!this.tasks.some(t => t.id === st.id)) this.tasks.push({ id: st.id, type: st.type, name: st.name, room: st.room, done: false }); this.dispatch = true; this.work = null; this.setGoal({ k: 'task', id: st.id, x: st.x, y: st.y, pr: 99, r: 45 }); }
 
   // ================= mensagens recebidas (só memória; nenhuma ação aqui) =================
   onMsg(m) {
@@ -108,7 +109,7 @@ export class Bot {
     const me = this.p; this.pos = { x: m.you[0], y: m.you[1] }; this.sab = m.sab; this.ec = m.ec | 0; this.tk = m.tk; this.ab = m.ab; this.vr = m.vr == null ? 3000 : m.vr; this.loc = m.loc; this.intro = m.intro;
     if (m.cd) { this.cdKill = m.cd[0]; this.sabCd = m.cd[1]; } this.lastRoom = roomName(this.pos.x, this.pos.y);
     const cur = new Map(); for (const [id, x, y, face, mv, gh, ap, inv] of m.pl) { if (id === me.id) continue; /* Chuck possuindo vê o próprio corpo parado */ cur.set(id, { id, x, y, mv: !!mv, ghost: !!gh, ph: gh === 2, ap, inv: !!inv }); }
-    { const nb = (m.bm || []).map(([id, x, y, t]) => ({ id, x, y, t })); for (const b of nb) if (!(this.bombs || []).some(o => o.id === b.id)) for (const o of cur.values()) if (!o.ghost && dist(o, b) < 260) this.sus(o.id, 16, 'bomba'); this.bombs = nb; } // quem estava perto de uma bomba nova fica suspeito
+    { const nb = (m.bm || []).map(([id, x0, y0, x, y, t]) => ({ id, x, y, t })); for (const b of nb) if (!(this.bombs || []).some(o => o.id === b.id)) for (const o of cur.values()) if (!o.ghost && dist(o, b) < 260) this.sus(o.id, 16, 'bomba'); this.bombs = nb; } // quem estava perto de uma bomba nova fica suspeito
     this.xt = m.xt || {}; this.fz = m.fz || [];
     const look = Math.min(this.vr, 420);
     if (me.alive && me.vent < 0 && !this.watching) {
@@ -134,7 +135,7 @@ export class Bot {
   camLedNear() { return [[1500, 650], [980, 930], [2000, 930], [2000, 1530]].some(([x, y]) => dist({ x, y }, this.pos) < 380); }
   onBody(id, x, y, viaCam, info) {
     (this.deathZones ||= []).push({ x, y, t: this.clock });
-    if (info) { if (info.fxk === 1) this.killerJob = JOB.redjohn; else if (info.fxk === 2) this.killerJob = JOB.samurai; if (info.bag) this.deduce(null, 'dexter', 0.7); if (info.g) this.deduce(null, 'vibora', 0.5); }
+    if (info) { if (info.fxk === 1) this.killerJob = JOB.redjohn; else if (info.fxk === 2) this.killerJob = JOB.samurai; else if (info.fxk === 3) this.deduce(null, 'bombardeiro', 0.5); else if (info.fxk === 4) this.deduce(null, 'chuck', 0.6); else if (info.fxk === 5) this.deduce(null, 'ninja', 0.7); if (info.bag) this.deduce(null, 'dexter', 0.7); if (info.g) this.deduce(null, 'vibora', 0.5); }
     const b = { id, x, y, t: this.clock, first: this.clock, rep: false, cam: !!viaCam, vib: !!(info && info.g), reactAt: this.clock + this.c('bot_react') * rnd(0.4, 1.1) }; this.bodies.set(id, b); this.deadKnown.add(id); this.hiddenDead.delete(id);
     for (const [pid, o] of this.seen) if (pid !== id && this.clock - o.t < 12 && dist(o, b) < 380) this.sus(pid, (dist(o, b) < 200 ? 28 : 16) * (this.clock - o.t < 3 ? 1 : 0.6), 'near');
     if (this.loc && dist({ x: this.loc[0], y: this.loc[1] }, b) < 450) this.sus(this.loc[2], 18, 'near');
@@ -383,6 +384,7 @@ export class Bot {
     const p = this.p; if (this.room.intro > 0) return;
     if (this.pendKill && this.clock - this.pendKill.at > 0.3) { const pk = this.pendKill; this.pendKill = null; if (this.cdKill > 5) this.afterKill(pk); }
     if (this.possd) return; // possuído: não controla o personagem
+    if (this.room.training) { if (!this.dispatch) return; if (!this.p.alive || (this.goalDone() && !this.work)) { this.dispatch = false; this.stop(); return; } } // treino: bot parado, salvo quando mandado até uma tarefa armadilhada
     if (this.watching) return this.camTick();
     if (p.vent >= 0) return this.ventTick();
     if (this.pause > 0) { this.pause -= dt; this.stop(); return; }
@@ -614,7 +616,7 @@ export class Bot {
   }
   bombT(use) { // Bombardeiro: joga a bomba onde há alguém perto e foge (o dono é imune)
     if (!this.p.alive || this.p.vent >= 0 || this.ab.cd.bomb > 0 || this.clock - this.gameT0 < 14 || !roll(0.12 + this.aggr() * 0.35 + use * 0.1)) return;
-    const R = this.c('bmb_r'), tg = [...this.vis.values()].filter(o => !o.ghost && !this.mates.has(o.id) && dist(o, this.pos) < 230), grp = tg.filter(o => tg.some(q => q !== o && dist(q, o) < R * 0.8));
+    const R = this.c('bmb_r'), tg = [...this.vis.values()].filter(o => !o.ghost && !this.mates.has(o.id) && dist(o, this.pos) < Math.min(this.c('bmb_range') - 20, 280)), grp = tg.filter(o => tg.some(q => q !== o && dist(q, o) < R * 0.8));
     const t = (grp[0] || (roll(0.4) ? tg[0] : null)); if (!t || this.witnesses(t.id) > 3) return;
     this.act({ t: 'ab', a: 'bomb', x: t.x, y: t.y }); this.setGoal(this.fleeGoal(t, 87));
   }

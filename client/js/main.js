@@ -1,6 +1,6 @@
 // Orquestra tudo: perfil, rede, estado do jogo, entrada, HUD e loop principal.
 import { net } from './net.js';
-import { initRender, render, R, fx, addFx, addShake, setQuality, drawCrew, toWorld } from './render.js';
+import { initRender, render, R, fx, addFx, addShake, setQuality, lowerQuality, drawCrew, toWorld } from './render.js';
 import { initAudio, A, sfx, alarm } from './audio.js';
 import { openTask, TASK_MIN } from './tasks.js';
 import * as UI from './ui.js';
@@ -30,14 +30,20 @@ function go(id) {
 }
 const inLobby = () => S.phase === 'lobby';
 const back = () => go(inLobby() ? 'lobby' : 'menu');
-function toMenu(msg) { S.phase = 'menu'; S.hideMe = true; S.me.alive = false; $('hud').classList.add('hide'); closeTaskUi(); alarm(false); sessionStorage.removeItem('quorum.s'); go('menu'); msg && UI.toast(msg); }
+function openTrainPc() { // escolhe a profissão para testar
+  const items = [{ id: 'r:me', label: '↺ Reviver e voltar ao início' }, { id: 'r:bots', label: '↺ Reviver os bots e limpar corpos' }];
+  for (const tm of ['inn', 'neu', 'imp']) for (const j of JOBS) if (j.team === tm && !j.ghost && !j.pair) items.push({ id: 'j:' + j.id, label: `${TEAMS[tm].icon} ${j.name}${S.job === j.id ? '  ✔' : ''}` });
+  UI.pickText('💻 Computador de treinamento — escolha a profissão', items, id => { if (id.startsWith('r:')) send({ t: 'trainReset', what: id.slice(2) }); else send({ t: 'trainJob', job: id.slice(2) }); });
+}
+function toMenu(msg) { S.training = false; $('bTrainX').classList.add('hide'); S.phase = 'menu'; S.hideMe = true; S.me.alive = false; $('hud').classList.add('hide'); closeTaskUi(); alarm(false); sessionStorage.removeItem('quorum.s'); go('menu'); msg && UI.toast(msg); }
 async function enter(kind, extra = {}) {
   initAudio(); P.name = sanitizeName($('nameIn').value); $('nameIn').value = P.name; save();
   try { await net.connect(); } catch { return UI.toast('Não foi possível conectar ao servidor.'); }
   send({ t: kind, name: P.name, look: P.look, ...extra });
 }
 $('nameIn').value = P.name;
-$('mPlay').onclick = () => enter('quick'); $('mCreate').onclick = () => enter('create'); $('mJoin').onclick = () => { initAudio(); go('join'); $('codeIn').focus(); };
+$('mPlay').onclick = () => enter('quick'); $('mTrain').onclick = () => enter('train');
+$('bTrainX').onclick = () => { send({ t: 'leave' }); S.training = false; toMenu(); }; $('mCreate').onclick = () => enter('create'); $('mJoin').onclick = () => { initAudio(); go('join'); $('codeIn').focus(); };
 $('jGo').onclick = () => { const code = $('codeIn').value.trim().toUpperCase(); code.length === 4 ? enter('join', { code }) : UI.toast('Digite o código de 4 letras.'); };
 $('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('jGo').click(); });
 $('codeIn').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); });
@@ -76,6 +82,7 @@ net.on('lobby', m => {
   UI.renderLobby(m, S.id, send, m.min);
 });
 function begin(m, resume) {
+  S.training = !!m.train; $('bTrainX').classList.toggle('hide', !S.training);
   S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t })); S.xt = {}; S.lover = m.lover ?? null; S.lov = null; S.lovFound = null; S.fz = []; S.bank = 0; S.spend = 0; S.voted = false; S.bombs = []; S.shurs = []; S.protId = m.pr ?? -1; S.camSel = 0; S.inqLeft = 0; S.jpAb = null; S.sageWant = false;
   Object.assign(S.me, { x: m.x, y: m.y, alive: m.alive !== false, vent: -1, moving: false }); S.players.clear(); S.bodies = []; S.deadKnown = new Set(); S.sab = null; S.emergUsed = m.emergUsed || 0; S.settings = m.settings;
   const mine = S.roster.get(S.id); S.look = mine.look; S.name = mine.name; S.hideMe = false; S.vr = 420; R.cam.x = m.x; R.cam.y = m.y; R.vis = 420;
@@ -106,7 +113,10 @@ function intro() {
 net.on('snap', m => {
   if (S.phase !== 'play') return;
   const [x, y, vent, ap, inv, sh] = m.you, me = S.me, d = Math.hypot(x - me.x, y - me.y); me.vent = vent; S.meInv = !!inv; S.meShield = sh; { const mr = S.roster.get(ap); if (mr) { S.look = mr.look; S.name = mr.name; } }
-  { const lag = 190 * (S.settings.speed || 1) * ((S.rtt || 80) / 2000 + 0.12) + 24; if (vent >= 0 || d > Math.max(170, lag * 3)) { me.x = x; me.y = y; } else if (d > lag) { me.x += (x - me.x) * 0.12; me.y += (y - me.y) * 0.12; } else if (!me.moving) { me.x += (x - me.x) * 0.25; me.y += (y - me.y) * 0.25; } }
+  { // reconciliação: compara o servidor com ONDE EU ESTAVA há 1 RTT (e não com onde estou agora); assim parar de andar não puxa o personagem de lado
+    const H = S.hist || (S.hist = []), tq = performance.now() - Math.min(400, S.rtt || 80); let hx = me.x, hy = me.y; for (let i = H.length - 1; i >= 0; i--) if (H[i].t <= tq) { hx = H[i].x; hy = H[i].y; break; }
+    const ex = x - hx, ey = y - hy, e = Math.hypot(ex, ey);
+    if (vent >= 0 || m.xt?.pd || e > 170) { me.x = x; me.y = y; H.length = 0; } else if (e > 1.5) { const f = e > 40 ? 0.5 : 0.3; me.x += ex * f; me.y += ey * f; for (const h of H) { h.x += ex * f; h.y += ey * f; } } }
   const seen = new Set();
   for (const [id, px, py, f, mv, g, ap, iv] of m.pl) {
     seen.add(id); let p = S.players.get(id); if (!p) { p = { x: px, y: py }; S.players.set(id, p); }
@@ -162,18 +172,19 @@ $('sabMenu').addEventListener('pointerdown', e => { const k = e.target.dataset.s
 
 // ---------- ações contextuais ----------
 function nearAction() {
-  const me = S.me; if (S.phase !== 'play' || me.vent >= 0 || S.xt.pc) return null; // possuindo: USAR indisponível
-  if (me.alive && S.sab) {
+  const me = S.me; if (S.phase !== 'play' || me.vent >= 0) return null; const pc = !!S.xt.pc; // possuindo: tarefas/conserto/câmeras indisponíveis; emergência e duto valem pelo corpo do possuído
+  if (me.alive && S.sab && !pc) {
     const k = S.sab.k, fix = (id, pt) => dist(me, pt) < 90 && { label: 'REPARAR', run: () => { S.acting = 1; sfx('click'); setTimeout(() => dist(S.me, pt) < 110 && send({ t: 'fix', id }), 1000); } };
     if (k === 'lights') { const f = fix('lights', SPECIAL.lights); if (f) return f; }
     if (k === 'comms') { const f = fix('comms', SPECIAL.comms); if (f) return f; }
     if (k === 'heat') { for (const [i, id, pt] of [[0, 'A', SPECIAL.heatA], [1, 'B', SPECIAL.heatB]]) if (!S.sab.fixed[i]) { const f = fix(id, pt); if (f) return f; } }
   }
   let best = null, bd = 90;
-  if (me.alive && S.xt.lt && dist(me, { x: S.xt.lt[0], y: S.xt.lt[1] }) < 90) return { label: 'ISQUEIRO', run: () => send({ t: 'ab', a: 'lighter' }) };
-  for (const t of S.myTasks) if (!t.done && !S.taskFrozen(t)) { const s = STATIONS.find(q => q.id === t.id), d = dist(me, s); if (d < bd) { bd = d; best = { label: 'TAREFA', run: () => startTask(t) }; } }
+  if (!pc && me.alive && S.xt.lt && dist(me, { x: S.xt.lt[0], y: S.xt.lt[1] }) < 90) return { label: 'ISQUEIRO', run: () => send({ t: 'ab', a: 'lighter' }) };
+  for (const t of pc ? [] : S.myTasks) if (!t.done && !S.taskFrozen(t)) { const s = STATIONS.find(q => q.id === t.id), d = dist(me, s); if (d < bd) { bd = d; best = { label: 'TAREFA', run: () => startTask(t) }; } }
   if (best) return best;
-  if (me.alive && !S.cams && dist(me, SPECIAL.camConsole) < 90) return { label: 'CÂMERAS', run: () => send({ t: 'ab', a: 'cam' }) };
+  if (!pc && me.alive && !S.cams && dist(me, SPECIAL.camConsole) < 90) return { label: 'CÂMERAS', run: () => send({ t: 'ab', a: 'cam' }) };
+  if (S.training && dist(me, SPECIAL.trainPc) < 110) return { label: 'COMPUTADOR', run: openTrainPc };
   if (me.alive && dist(me, SPECIAL.emergency) < 100 && S.emergUsed < S.settings.emergencies && S.sab?.k !== 'heat') return S.emergCd > 0 ? { label: `EMERG. ${S.emergCd}s`, off: true, run() { } } : { label: 'EMERGÊNCIA', run: () => { S.emergUsed++; send({ t: 'emergency' }); } };
   return null;
 }
@@ -182,14 +193,14 @@ function startTask(t) {
   closeTask = openTask(t.type, t.name, () => { closeTask = null; setTimeout(() => send({ t: 'taskDone', id: t.id }), Math.max(0, TASK_MIN[t.type] - (Date.now() - t0)) + 80); }, () => { closeTask = null; });
 }
 const doUse = () => nearAction()?.run();
-const bodyNear = () => S.me.alive && !S.xt.pc && S.bodies.some(b => dist(S.me, b) < 150);
+const bodyNear = () => S.me.alive && S.bodies.some(b => dist(S.me, b) < 150);
 const doReport = () => bodyNear() && send({ t: 'report' });
 const canKillNow = () => S.role === 'imp' || (S.job === 'jackpot' && S.xt.jp?.[0] === 'kill' && S.me.alive);
 function killTarget() { let b = null, bd = 95; for (const [id, p] of S.players) if (!p.ghost && id !== S.id && !S.mates.has(id) && dist(S.me, p) < bd) { b = id; bd = dist(S.me, p); } return b; }
 const doKill = () => { if (canKillNow() && S.me.alive && !S.cd[0] && killTarget() != null) send({ t: 'kill' }); };
 const ventNear = () => VENTS.some(v => dist(S.me, v) < 80);
 const canVent = () => S.team === 'imp' || S.job === 'engenheiro';
-function doVent() { if (!canVent() || !S.me.alive || S.xt.pc || S.xt.pd) return; if (S.me.vent >= 0) { send({ t: 'vent', a: 'out' }); sfx('vent'); } else if (ventNear()) { send({ t: 'vent', a: 'in' }); sfx('vent'); } }
+function doVent() { if (!canVent() || !S.me.alive || S.xt.pd) return; if (S.me.vent >= 0) { send({ t: 'vent', a: 'out' }); sfx('vent'); } else if (ventNear()) { send({ t: 'vent', a: 'in' }); sfx('vent'); } }
 
 // ---------- HUD ----------
 const mini = $('mini'), mc = mini.getContext('2d'), ms = mini.width / WORLD.w;
@@ -246,12 +257,15 @@ function update(dt) {
     else { const ph = S.ab?.act?.phase > 0, ok = (x, y) => !frozenHit(x, y) && (ph ? x > 20 && y > 20 && x < WORLD.w - 20 && y < WORLD.h - 20 : canStand(x, y)); if (ok(me.x + dx, me.y)) me.x += dx; if (ok(me.x, me.y + dy)) me.y += dy; }
     if (me.alive && (footT -= dt) <= 0) { sfx('step'); footT = 0.3; }
   }
-  for (const p of S.players.values()) { const k = 1 - Math.exp(-dt * 14); p.x += (p.tx - p.x) * k; p.y += (p.ty - p.y) * k; }
+  if (S.phase === 'play') { const nt = performance.now(), H = S.hist || (S.hist = []); H.push({ t: nt, x: me.x, y: me.y }); while (H.length && H[0].t < nt - 1500) H.shift(); }
+  for (const p of S.players.values()) { const k = 1 - Math.exp(-dt * 22); p.x += (p.tx - p.x) * k; p.y += (p.ty - p.y) * k; }
   S.acting = Math.max(0, S.acting - dt * 1.2);
   A.tension += ((S.sab ? 0.85 : S.bodies.length ? 0.6 : 0.15) - A.tension) * Math.min(1, dt * 0.8);
   hud(dt);
 }
-function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; update(dt); touchUi(); render(S, dt); requestAnimationFrame(frame); }
+function frame(now) { const raw = now - last, dt = Math.min(0.05, raw / 1000); last = now;
+  if (raw < 250) { S._ema = (S._ema || 16) * 0.95 + raw * 0.05; if (S.phase === 'play' && S._ema > 30 && ++S._slow > 150) { S._slow = 0; S._ema = 16; lowerQuality(); } else if (S._ema <= 30) S._slow = 0; } // qualidade adaptativa: se o aparelho não aguenta, reduz a resolução sozinho
+  update(dt); touchUi(); render(S, dt); requestAnimationFrame(frame); }
 // ---------- profissões: habilidades, painel e mapa grande ----------
 const effJob = () => (S.me.alive ? S.job : S.ghostJob);
 const nearP = r => { let b = null, bd = r; for (const p of S.players.values()) if (!p.ghost && dist(S.me, p) < bd) { b = p; bd = dist(S.me, p); } return b; };
@@ -269,7 +283,7 @@ function buildMeetAb() {
     mk('GUARDAR VOTO', () => send({ t: 'ab', a: 'lawsave' }), !can || S.bank >= max);
   }
   if (S.job === 'lovers' && S.me.alive) { const lv = S.lov, info = document.createElement('span'); info.textContent = `💗 Par: ${S.roster.get(S.lover)?.name || '?'}${S.lovFound != null ? ` · impostor: ${S.roster.get(S.lovFound)?.name || '?'}` : ''}`; box.append(info); }
-  for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg' || id === 'lovfind' || id === 'inq' || id === 'sage') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = id === 'inq' ? `${label} (${S.inqLeft})` : label; if (id === 'inq') b.disabled = !(S.inqLeft > 0) || !S.me.alive; press(b, () => useAbility(id)); box.append(b); }
+  for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg' || id === 'lovfind' || id === 'inq' || id === 'sage' || id === 'radar') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = id === 'inq' ? `${label} (${S.inqLeft})` : label; if (id === 'inq') b.disabled = !(S.inqLeft > 0) || !S.me.alive; press(b, () => useAbility(id)); box.append(b); }
 }
 function updAbil(me) {
   const ab = S.ab, v = $('bVent'), cv = canVent() && me.alive; v.classList.toggle('hide', !cv);
@@ -293,7 +307,7 @@ function updAbil(me) {
     if (id === 'revive') { dis = cd > 0 || !(ab.us.med > 0) || !(S.xt.carry > 0 || bodyNear()); if (!cd) txt = 'x' + (ab.us.med | 0); }
     if (id === 'lovfind') { const lv = S.lov; dis = !(lv && lv[5] === 1); txt = !lv ? '—' : lv[6] === 1 ? '✓' : lv[5] === 1 ? '!' : '—'; if (lv && lv[6] === 1) dis = false; }
     if (id === 'trap') { const tr = S.xt.tr || []; dis = cd > 0 || !nearStation(110) || tr.length >= S.settings.trap_max; if (!cd) txt = tr.length + '/' + S.settings.trap_max; }
-    if (id === 'poss') { dis = cd > 0 || !!S.xt.pc || !nearP(220); if (S.xt.pc) txt = S.xt.pc[1] + 's'; }
+    if (id === 'poss') { dis = cd > 0 || !!S.xt.pc; if (S.xt.pc) txt = S.xt.pc[1] + 's'; }
     if (id === 'clean') { dis = cd > 0 || !bodyNear() || S.xt.cl > 0; if (S.xt.cl > 0) txt = S.xt.cl + 's'; }
     if (id === 'swap') { dis = cd > 0 || !(ab.us.swp > 0) || !nearP(180); if (!cd) txt = 'x' + (ab.us.swp | 0); }
     if (id === 'protect') { const pr = S.xt.pr; dis = !(pr && pr[0] < 0); txt = dis ? '✓' : pr[3] + 's'; }
@@ -308,16 +322,17 @@ function updAbil(me) {
 const abilN = i => { const b = $('abil').children[i]; if (b && !b.disabled) useAbility(b.dataset.id); };
 const nearStation = r => STATIONS.find(s => dist(S.me, s) < r);
 function useAbility(id) {
-  const ph = S.phase; if (ph !== 'play' && !((id === 'panel' || id === 'infmsg' || id === 'lovfind' || id === 'inq' || id === 'sage' || id === 'jpinfo') && (ph === 'meet' || ph === 'vote'))) return;
+  const ph = S.phase; if (ph !== 'play' && !((id === 'panel' || id === 'infmsg' || id === 'lovfind' || id === 'inq' || id === 'sage' || id === 'jpinfo' || id === 'radar') && (ph === 'meet' || ph === 'vote'))) return;
   const all = [...S.roster].map(([i, r]) => ({ id: i, name: r.name, look: r.look, dead: S.deadKnown.has(i) })), others = all.filter(x => x.id !== S.id);
   if (id === 'inq') return startInq();
   if (id === 'trap') { const st = nearStation(110); return st ? send({ t: 'ab', a: 'trap', id: st.id }) : UI.toast('Aproxime-se de uma estação de tarefa.'); }
-  if (id === 'poss') { const c = others.filter(o => !S.mates.has(o.id) && S.players.get(o.id) && !S.players.get(o.id).ghost && dist(S.me, S.players.get(o.id)) < 220); return c.length ? UI.pick('Possuir quem?', c, to => send({ t: 'ab', a: 'poss', to })) : UI.toast('Ninguém ao alcance para possuir.'); }
+  if (id === 'poss') { const c = others.filter(o => !S.mates.has(o.id) && !o.dead); return c.length ? UI.pick('Possuir quem? (de qualquer lugar do mapa)', c, to => send({ t: 'ab', a: 'poss', to })) : UI.toast('Ninguém para possuir.'); }
   if (id === 'swap') { const c = others.filter(o => S.players.get(o.id) && !S.players.get(o.id).ghost && dist(S.me, S.players.get(o.id)) < 180); return c.length ? UI.pick('Trocar de profissão com quem?', c, to => send({ t: 'ab', a: 'swap', to })) : UI.toast('Ninguém ao alcance para trocar.'); }
   if (id === 'protect') return UI.pick('Proteger quem? (se ele morrer, você morre)', others.filter(o => !o.dead), to => send({ t: 'ab', a: 'protect', to }));
   if (id === 'bomb') { const R0 = S.settings.bmb_range || 320; let tg = null, bd = R0; for (const [i, p] of S.players) if (!p.ghost && i !== S.id && !S.mates.has(i) && dist(S.me, p) < bd) { tg = p; bd = dist(S.me, p); } return send({ t: 'ab', a: 'bomb', x: tg ? tg.x : S.me.x + S.me.face * R0 * 0.7, y: tg ? tg.y : S.me.y }); } // arremessa na direção do alvo mais próximo (ou para a frente)
   if (id === 'shuriken') { let tg = null, bd = S.settings.nin_range || 450; for (const [i, p] of S.players) if (!p.ghost && i !== S.id && !S.mates.has(i) && dist(S.me, p) < bd) { tg = p; bd = dist(S.me, p); } const ang = tg ? Math.atan2(tg.y - S.me.y, tg.x - S.me.x) : (S.me.face > 0 ? 0 : Math.PI); return send({ t: 'ab', a: 'shuriken', ang }); }
   if (id === 'sage') { S.sageWant = true; return send({ t: 'ab', a: 'sage' }); }
+  if (id === 'radar') { sfx('click'); document.body.classList.add('radarPing'); setTimeout(() => document.body.classList.remove('radarPing'), 900); return send({ t: 'ab', a: 'radar' }); }
   if (id === 'freeze') { const sel = S.xt.sel || []; return UI.pickText(`Congelar qual área? (${sel.length}/${S.settings.frz_n})`, FREEZABLE.filter(i => !S.fz.includes(i)).map(i => ({ id: i, label: (sel.includes(i) ? '❄ ' : '') + ROOM_BY_ID[i].name })), room => send({ t: 'ab', a: 'freeze', room })); }
   if (id === 'locate') return UI.pick('Rastrear quem?', others, to => send({ t: 'ab', a: 'locate', to }));
   if (id === 'shield') return UI.pick('Proteger quem?', all, to => send({ t: 'ab', a: 'shield', to }));
@@ -329,7 +344,7 @@ function setObj(me) {
   const o = $('hObj'), j = JOB[S.job]; const b = document.createElement('b'); b.textContent = j.name; paintJob(b, j);
   let rest = !me.alive ? ' — fantasma' + (S.ghostJob ? ` (${JOB[S.ghostJob].name})` : '') : S.team === 'imp' ? ' — elimine sem ser descoberto' + (S.job === 'samurai' ? ` · armadura ${S.xt.arm > 0 ? 'PRONTA' : 'usada'}` : S.job === 'dexter' && S.xt.carry > 0 ? ` · carregando saco ${S.xt.carry}s` : '') : S.job === 'joker' ? ' — faça-os votar em você' : S.job === 'execution' ? ` — ejete ${S.roster.get(S.target)?.name || 'o alvo'}` : S.job === 'congelador' ? ` — congeladas ${S.fz.length}/${S.settings.frz_win} · selecionadas ${(S.xt.sel || []).length}/${S.settings.frz_n}` : S.job === 'parinomo' ? (S.xt.hl ? ' — incendeie a nave!' : S.xt.pf && S.xt.pf[0] >= S.xt.pf[1] ? ' — ache o isqueiro' : ` — abastecidos ${S.xt.pf?.[0] ?? 0}/${S.xt.pf?.[1] ?? 0}`) : S.job === 'virus' ? (S.xt.vi && S.xt.vi[0] >= S.xt.vi[1] ? ' — EXPLODA!' : ` — infectados ${S.xt.vi?.[0] ?? 0}/${S.xt.vi?.[1] ?? 0}`) : S.job === 'medico' ? ' — leve corpos à Enfermaria e ressuscite' + (S.xt.carry > 0 ? ` · carregando ${S.xt.carry}s` : '') : S.job === 'lovers' ? ` — termine as tarefas junto de ${S.roster.get(S.lover)?.name || 'seu par'}` : S.team === 'neu' ? '' : ` — suas tarefas ${S.myTasks.filter(t => t.done).length}/${S.myTasks.filter(t => t.done || !S.taskFrozen(t)).length}`;
   if (S.xt.pd) rest += ' · ⚠ POSSUÍDO: você não controla o personagem';
-  if (S.xt.pc) rest += ` · POSSUINDO ${S.roster.get(S.xt.pc[0])?.name || '?'} (${S.xt.pc[1]}s) — mova e ELIMINE; USAR/REPORTAR/DUTO indisponíveis`;
+  if (S.xt.pc) rest += ` · POSSUINDO ${S.roster.get(S.xt.pc[0])?.name || '?'} (${S.xt.pc[1]}s) — mova, ELIMINE, REPORTE, use o DUTO e SABOTE pelo corpo dele (tarefas indisponíveis)`;
   if (S.job === 'sabotador' && S.xt.tr) rest += ` · bombas ativas ${S.xt.tr.length}/${S.settings.trap_max}`;
   if (S.job === 'faxineiro' && S.xt.cl > 0) rest += ` · limpando… ${S.xt.cl}s (fique perto)`;
   if (S.job === 'seguranca' && S.xt.pr) rest += S.xt.pr[0] < 0 ? ` · escolha quem proteger (${S.xt.pr[3]}s)` : ` · protegendo ${S.roster.get(S.xt.pr[0])?.name || '?'}${S.xt.pr[1] ? '' : ' (morto)'}${S.xt.pr[2] ? ' · joga com os impostores' : ''}`;
@@ -381,17 +396,29 @@ net.on('kanim', m => { const k = m.k != null ? S.roster.get(m.k)?.look : null, v
 const autoDev = matchMedia('(pointer: coarse)').matches ? 'mobile' : 'pc';
 function applyDevice(dev, persist = true) { if (persist) { P.device = dev; save(); } S.touch = dev === 'mobile'; document.body.classList.toggle('touch', S.touch); document.body.classList.toggle('pc', !S.touch); }
 applyDevice(P.device || autoDev, false);
-document.querySelectorAll('[data-dev]').forEach(b => { if (b.dataset.dev === autoDev) b.textContent += '  (recomendado)'; b.onclick = () => { applyDevice(b.dataset.dev); go('menu'); }; });
+document.querySelectorAll('[data-dev]').forEach(b => { if (b.dataset.dev === autoDev) b.textContent += '  (recomendado)'; b.onclick = () => { applyDevice(b.dataset.dev); if (b.dataset.dev === 'mobile' && !P.qSet) { P.q = 0; P.qSet = 1; setQuality(0); save(); } go('menu'); }; });
 const zone = $('joyZone'), jbase = $('joyBase'), jknob = $('joyKnob'); let jp = null, jo = { x: 0, y: 0 };
-function moveJoy(e) {
-  let dx = e.clientX - jo.x, dy = e.clientY - jo.y; const R = 56, l = Math.hypot(dx, dy) || 1; if (l > R) { dx = dx / l * R; dy = dy / l * R; }
+function moveJoy(x, y) {
+  let dx = x - jo.x, dy = y - jo.y; const R = 56, l = Math.hypot(dx, dy) || 1; if (l > R) { dx = dx / l * R; dy = dy / l * R; }
   jknob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; const m = Math.hypot(dx, dy) / R; S.joy = m < 0.22 ? { x: 0, y: 0 } : { x: dx / Math.hypot(dx, dy), y: dy / Math.hypot(dx, dy) };
 }
-function endJoy(e) { if (e.pointerId !== jp) return; jp = null; S.joy = { x: 0, y: 0 }; jbase.style.display = 'none'; jknob.style.transform = 'translate(-50%,-50%)'; }
-zone.addEventListener('pointerdown', e => { tryPhantom(e.clientX, e.clientY); if (jp !== null) return; jp = e.pointerId; try { zone.setPointerCapture(jp); } catch { } jo = { x: e.clientX, y: e.clientY }; jbase.style.display = 'block'; jbase.style.left = jo.x + 'px'; jbase.style.top = jo.y + 'px'; moveJoy(e); });
-zone.addEventListener('pointermove', e => { if (e.pointerId === jp) moveJoy(e); });
-zone.addEventListener('pointerup', endJoy); zone.addEventListener('pointercancel', endJoy);
-zone.addEventListener('lostpointercapture', endJoy); addEventListener('blur', () => { if (jp !== null) endJoy({ pointerId: jp }); }); document.addEventListener('visibilitychange', () => { if (document.hidden && jp !== null) endJoy({ pointerId: jp }); });
+function startJoy(id, x, y) { if (jp !== null) return; jp = id; jo = { x, y }; jbase.style.display = 'block'; jbase.style.left = x + 'px'; jbase.style.top = y + 'px'; moveJoy(x, y); }
+function endJoy(id) { if (id !== undefined && id !== jp) return; jp = null; S.joy = { x: 0, y: 0 }; jbase.style.display = 'none'; jknob.style.transform = 'translate(-50%,-50%)'; }
+// Celulares: eventos de TOQUE (funcionam em todos os navegadores/WebViews; os pointer events são cancelados por alguns aparelhos). PC: mouse/pointer.
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+  const tch = (e, id) => { for (const t of e.changedTouches) if (t.identifier === id) return t; return null; };
+  zone.addEventListener('touchstart', e => { e.preventDefault(); const t = e.changedTouches[0]; tryPhantom(t.clientX, t.clientY); startJoy(t.identifier, t.clientX, t.clientY); }, { passive: false });
+  zone.addEventListener('touchmove', e => { e.preventDefault(); if (jp === null) return; const t = tch(e, jp); if (t) moveJoy(t.clientX, t.clientY); }, { passive: false });
+  const te = e => { if (jp !== null && tch(e, jp)) { e.preventDefault(); endJoy(jp); } };
+  zone.addEventListener('touchend', te, { passive: false }); zone.addEventListener('touchcancel', te, { passive: false });
+  // se o aparelho foi marcado como "Computador" mas o jogador toca na tela durante a partida, troca para o modo celular
+  document.addEventListener('touchstart', () => { if (!S.touch && S.phase === 'play') applyDevice('mobile', false); }, { passive: true });
+} else {
+  zone.addEventListener('pointerdown', e => { tryPhantom(e.clientX, e.clientY); startJoy(e.pointerId, e.clientX, e.clientY); try { zone.setPointerCapture(e.pointerId); } catch { } });
+  zone.addEventListener('pointermove', e => { if (e.pointerId === jp) moveJoy(e.clientX, e.clientY); });
+  zone.addEventListener('pointerup', e => endJoy(e.pointerId)); zone.addEventListener('pointercancel', e => endJoy(e.pointerId)); zone.addEventListener('lostpointercapture', e => endJoy(e.pointerId));
+}
+addEventListener('blur', () => endJoy()); document.addEventListener('visibilitychange', () => { if (document.hidden) endJoy(); });
 addEventListener('contextmenu', e => { if (S.touch) e.preventDefault(); });
 let lastJoyShow = null, lastIngame = null;
 function touchUi() {
@@ -424,7 +451,8 @@ net.on('unlock', () => { S.jobPanel = true; UI.toast('Painel de profissões desb
 net.on('jobpanel', m => UI.pick('Painel de profissões', m.list.map(([id, job, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: `${JOB[job].name} · ${al ? 'VIVO' : 'MORTO'}`, dead: !al })), null));
 net.on('panel', m => UI.pick('Painel do Cientista', m.list.map(([id, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: al ? 'VIVO' : 'MORTO', dead: !al })), null));
 net.on('reveal', m => { for (const [id, j] of m.list) S.known.set(id, j); UI.toast(m.all ? 'Todas as profissões foram reveladas!' : `Descoberto: ${S.roster.get(m.list[0][0])?.name} é ${JOB[m.list[0][1]].name}.`, 6000); sfx('ok'); });
-net.on('shield', m => { UI.toast(`Um Anjo protege você por ${m.dur}s!`, 5000); sfx('fixed'); });
+net.on('shield', m => { if (m.pro) UI.toast('🔮 Pressentimento: escudo ativo até a próxima reunião.', 4500); else UI.toast(`Um Anjo protege você por ${m.dur}s!`, 5000); sfx('fixed'); });
+net.on('shieldOff', () => { S.meShield = 0; });
 net.on('infmsg', m => { UI.toast(m.text, 8000); sfx('report'); });
 net.on('ghost', m => { S.ghostJob = m.job; S._ej = null; buildAbil(); UI.toast(`Você recebeu a profissão: ${JOB[m.job].name}.`, 5000); });
 net.on('sup', m => { S.sup = m.left; if (m.fresh) UI.toast('Voto Supremo desbloqueado! Use-o na votação.', 5000); });
@@ -447,7 +475,7 @@ net.on('matejob', m => { S.known.set(m.id, m.job); });
 net.on('ally', m => { S.mates.add(m.id); S.known.set(m.id, m.job); UI.toast(`🛡 ${S.roster.get(m.id)?.name || '?'} é o Segurança e protege um impostor: ele joga com vocês.`, 9000); sfx('ok'); });
 net.on('prot', m => { S.protId = m.id; UI.toast(`🛡 Você protege ${S.roster.get(m.id)?.name || '?'}${m.ally ? ' — um IMPOSTOR: agora você joga com os impostores!' : '.'} Se ele morrer, você morre.`, 9000); });
 net.on('jproll', m => { S.jpAb = m.ab; UI.roulette(m.ab, !!m.again, m.round); });
-net.on('possOn', m => { UI.toast(`Você possuiu ${S.roster.get(m.id)?.name || '?'} por ${m.dur}s. Mova-se e ELIMINE; USAR/REPORTAR/DUTO ficam indisponíveis.`, 6000); sfx('sabotage'); addShake(6); });
+net.on('possOn', m => { UI.toast(`Você possuiu ${S.roster.get(m.id)?.name || '?'} por ${m.dur}s. Mova-se, ELIMINE, REPORTE, use o DUTO e SABOTE pelo corpo dele.`, 6000); sfx('sabotage'); addShake(6); });
 net.on('possd', () => { UI.toast('⚠ Você foi possuído! Não consegue controlar o seu personagem.', 6000); sfx('blackout'); addShake(10); });
 net.on('possEnd', () => { UI.toast('A possessão terminou.', 3500); sfx('fixed'); });
 net.on('boom', m => { addFx({ k: 'boom', x: m.x, y: m.y, r: m.r, dur: 0.8 }); addShake(Math.max(4, 14 - Math.hypot(m.x - S.me.x, m.y - S.me.y) / 80)); R.flash = Math.max(R.flash, 0.4); sfx('boom'); });
@@ -461,6 +489,21 @@ function showSage() {
   UI.pickInfo('Painel do Sábio', [m.unl ? 'Profissões presentes e se ainda têm jogadores vivos:' : 'Profissões presentes na partida (conclua as tarefas para ver quais seguem vivas):', ...m.list.map(r => `${JOB[r[0]]?.name || r[0]}${m.unl ? (r[1] ? ' — VIVA ✔' : ' — sem vivos ✕') : ''}`)], 'sage');
 }
 net.on('sage', m => { S.sage = m; if (S.sageWant || $('pkT').dataset.k === 'sage' && $('pick').classList.contains('on')) { S.sageWant = false; showSage(); } });
+
+// ---------- v2.5: Profeta ----------
+const TCOL = { inn: '#7cc4ff', neu: '#d2a8ff', imp: '#ff6b84' };
+net.on('radar', m => {
+  const lines = ['Profissões presentes nesta partida (sem revelar quem as possui):']; for (const [j, n, tm] of m.list) lines.push({ t: `${JOB[j]?.name || j}${n > 1 ? ' ×' + n : ''} — ${TEAMS[tm]?.name || tm}`, c: TCOL[tm] });
+  UI.pickInfo('📡 Radar de Profissões', lines, 'radar'); sfx('ok');
+});
+function addProphet(m, quiet) { // Sentido da Morte: painel discreto, só para o Profeta
+  const box = $('prophet'); if (!box) return; const d = document.createElement('div'); d.className = 'pn';
+  const jn = JOB[m.job]?.name || m.job, tm = TEAMS[m.team]?.name || m.team; d.style.borderLeftColor = TCOL[m.team] || '#7cc4ff';
+  d.innerHTML = '<small>🔮 Sentido da Morte</small>'; const b = document.createElement('b'); b.textContent = m.name; const s = document.createElement('span'); s.textContent = ` era ${jn} (${tm})`; s.style.color = TCOL[m.team] || '#fff'; d.append(b, s); box.append(d);
+  while (box.children.length > 4) box.firstChild.remove(); setTimeout(() => d.remove(), 18000); if (!quiet) { sfx('bad'); }
+}
+net.on('prophet', m => addProphet(m));
+net.on('prophetLog', m => (m.list || []).slice(-3).forEach(e => addProphet(e, true)));
 requestAnimationFrame(frame);
 go('menu');
 if (!P.device) go('device');

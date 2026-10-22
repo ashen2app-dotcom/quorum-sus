@@ -79,11 +79,11 @@ const GAMES = {
     btn.onclick = () => { if (stage === 0) { stage = 1; sfx('node'); label(); } else if (stage === 1) { v = Math.min(1, v + 0.09); sfx('click'); } else { if (v >= z0 && v <= z1) win(); else { shake(b.querySelector('.pgauge')); stage = 1; inZ = 0; label(); } } };
     (function loop(t) { const dt = Math.min(0.1, (t - last) / 1000); last = t; if (stage === 1) { v = Math.max(0, v - dt * 0.22); if (v >= z0 && v <= z1) { inZ += dt; if (inZ >= 1.5) { stage = 2; sfx('node'); label(); } } else inZ = 0; } fill.style.height = v * 100 + '%'; st.raf = requestAnimationFrame(loop); })(last);
   },
-  swipe(b, win) { // interação com objeto: deslize o cartão na velocidade certa
+  swipe(b, win, st) { // interação com objeto: deslize o cartão na velocidade certa
     b.innerHTML = '<p class="hint">Deslize o cartão da esquerda para a direita, nem rápido nem devagar.</p><div class="swp"><div class="track"></div><div class="card2s">▤</div></div><p class="hint msg"></p>'; const box = b.querySelector('.swp'), cd = b.querySelector('.card2s'), msg = b.querySelector('.msg'); let t0 = 0, drag = false, sx = 0;
     const W = () => box.clientWidth - cd.offsetWidth; cd.style.left = '0px';
     cd.onpointerdown = e => { drag = true; sx = e.clientX; t0 = performance.now(); cd.setPointerCapture(e.pointerId); msg.textContent = ''; };
-    cd.onpointermove = e => { if (!drag) return; cd.style.left = Math.max(0, Math.min(W(), e.clientX - sx)) + 'px'; };
+    cd.onpointermove = e => { if (!drag) return; cd.style.left = Math.max(0, Math.min(W(), (e.clientX - sx) / (st.sc || 1))) + 'px'; }; // st.sc: escala do encaixe na tela
     const end = () => { if (!drag) return; drag = false; const x = parseFloat(cd.style.left) || 0, dt = performance.now() - t0; cd.style.left = '0px'; if (x < W() - 4) { msg.textContent = 'Deslize até o fim.'; shake(box); } else if (dt < 450) { msg.textContent = 'Rápido demais!'; shake(box); } else if (dt > 1500) { msg.textContent = 'Devagar demais!'; shake(box); } else win(); };
     cd.onpointerup = end; cd.onpointercancel = end;
   },
@@ -97,10 +97,14 @@ function seq(b, win, items, label, fmt, bars) {
 export function openTask(type, title, done, cancel) {
   const ov = document.getElementById('task'); ov.innerHTML = ''; ov.classList.add('on');
   const card = document.createElement('div'); card.className = 'card'; card.innerHTML = '<div class="ttl"><b></b><button class="x" aria-label="Fechar">✕</button></div><div class="body"></div>'; card.querySelector('b').textContent = title; ov.append(card);
-  const st = { raf: 0 }; let closed = false;
+  const st = { raf: 0, sc: 1 }; let closed = false;
+  // a tarefa inteira cabe na tela (sem rolar): reduz a escala do cartão se ele for maior que a área visível
+  const fit = () => { card.style.transform = ''; const vv = window.visualViewport, aw = (vv ? vv.width : innerWidth) - 16, ah = (vv ? vv.height : innerHeight) - 16, w = card.offsetWidth, h = card.offsetHeight; const k = Math.max(0.4, Math.min(1, aw / w, ah / h)); st.sc = k; card.style.transform = k < 1 ? `scale(${k})` : ''; };
+  const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null; ro?.observe(card); addEventListener('resize', fit); window.visualViewport?.addEventListener('resize', fit);
   const kd = e => { if (e.key === 'Escape') close(false); else if (e.type === 'keydown' || st.wantUp) st.key?.(e); };
-  const close = ok => { if (closed) return; closed = true; cancelAnimationFrame(st.raf); removeEventListener('keydown', kd); removeEventListener('keyup', kd); st.stop?.(); if (st.up) { removeEventListener('pointerup', st.up); removeEventListener('pointercancel', st.up); } ov.classList.remove('on'); ov.innerHTML = ''; ok ? done() : cancel?.(); };
+  const close = ok => { if (closed) return; closed = true; ro?.disconnect(); removeEventListener('resize', fit); window.visualViewport?.removeEventListener('resize', fit); cancelAnimationFrame(st.raf); removeEventListener('keydown', kd); removeEventListener('keyup', kd); st.stop?.(); if (st.up) { removeEventListener('pointerup', st.up); removeEventListener('pointercancel', st.up); } ov.classList.remove('on'); ov.innerHTML = ''; ok ? done() : cancel?.(); };
   addEventListener('keydown', kd); addEventListener('keyup', kd); card.querySelector('.x').onclick = () => close(false);
+  setTimeout(fit, 0);
   GAMES[type](card.querySelector('.body'), () => { sfx('ok'); card.classList.add('win'); setTimeout(() => close(true), 650); }, st);
   return close;
 }

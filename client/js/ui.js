@@ -142,20 +142,24 @@ export function renderJobs(L, myId, send) {
     let last = ''; for (const p of BOT_PARAMS) { if (p.k === 'bot_on' || p.k === 'bot_n') continue; if (p.grp !== last) { body.append(el('div', 'jgrp', p.grp.toUpperCase())); last = p.grp; } const r = el('div', 'jrow'); r.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); body.append(r); }
     return;
   }
-  if (jtab === 'neu' || jtab === 'imp') { // quantidade de neutros/impostores ficam na própria página da equipe
+  if (jtab === 'neu' || jtab === 'imp') { // quantidade de neutros/impostores também aparece na página da equipe
     const g = el('div', 'jrow'); g.style.gridColumn = '1/3';
     if (jtab === 'neu') g.append(el('small', null, 'Quantos neutros entram na partida.'), slider('Neutros na partida', 'neutrals', 0, 4, 1, v => v));
     else g.append(el('small', null, 'Impostores em “Auto” segue 1/2/3 por tamanho da sala.'), slider('Impostores (0 = Auto)', 'impostors', 0, 3, 1, v => v || 'Auto'));
     body.append(g);
   }
-  for (const j of JOBS.filter(x => x.team === jtab)) {
-    const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); paintJob(nm, j);
-    row.append(nm, el('small', null, j.desc + (j.ghost ? ' (só recebida após morrer)' : '')), slider(j.ghost ? 'Chance ao morrer' : 'Chance de aparecer', 'w_' + j.id, 0, 100, 5, v => v + '%'));
-    if (j.id !== 'tripulante') row.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v));
-    for (const k of JOB_PARAMS[j.id] || []) { const p = PARAMS.find(q => q.k === k); if (p) row.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); } // recargas, limites e regras de cada profissão ficam no cartão dela
-    body.append(row);
+  for (const j of JOBS.filter(x => x.team === jtab)) { // cartão da profissão: as configurações ficam escondidas atrás da engrenagem ⚙
+    const row = el('div', 'jrow'), head = el('div', 'jhead'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); paintJob(nm, j);
+    const gear = el('button', 'gear' + (openJobs.has(j.id) ? ' on' : ''), '⚙'); gear.type = 'button'; gear.title = 'Configurações da profissão'; gear.setAttribute('aria-label', 'Configurações de ' + j.name);
+    const cfg = el('div', 'jcfg'); cfg.hidden = !openJobs.has(j.id);
+    gear.onclick = () => { const o = cfg.hidden; cfg.hidden = !o; gear.classList.toggle('on', o); o ? openJobs.add(j.id) : openJobs.delete(j.id); };
+    cfg.append(slider(j.ghost ? 'Chance ao morrer' : 'Chance de aparecer', 'w_' + j.id, 0, 100, 5, v => v + '%'));
+    if (j.id !== 'tripulante') cfg.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v));
+    for (const k of JOB_PARAMS[j.id] || []) { const p = PARAMS.find(q => q.k === k); if (p) cfg.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); }
+    head.append(nm, gear); row.append(head, el('small', null, j.desc + (j.ghost ? ' (só recebida após morrer)' : '')), cfg); body.append(row);
   }
 }
+const openJobs = new Set();
 // ---------- seleção de jogador / mensagem / painel ----------
 const lockPick = p => { p.style.pointerEvents = 'none'; clearTimeout(lockPick.t); lockPick.t = setTimeout(() => { p.style.pointerEvents = ''; }, 450); }; // evita o 'clique fantasma' do toque que abriu o seletor
 export function pick(title, items, cb) {
@@ -258,7 +262,8 @@ export function markDead(id) { const c = M.cards.get(id); if (!c || c.classList.
 export function setAlive(v) { if (M.ctx) M.ctx.alive = v; if (!v) { $('mVote').disabled = true; $('mSkip').disabled = true; } }
 export function pickInfo(title, lines, key) { // painel só de leitura
   const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; $('pkT').dataset.k = key || ''; l.innerHTML = '';
-  lines.forEach((t, i) => { const b = el(i === 0 ? 'p' : 'button', i === 0 ? 'hint' : 'pk', t); if (i) b.disabled = true; l.append(b); });
+  lines.forEach((t, i) => { const txt = typeof t === 'string' ? t : t.t, b = el(i === 0 ? 'p' : 'button', i === 0 ? 'hint' : 'pk', txt); if (t.c) b.style.color = t.c; if (i) b.disabled = true; l.append(b); }); // t pode ser {t, c}: texto + cor da categoria
+  p.classList.toggle('radar', key === 'radar');
   $('pkX').onclick = () => { p.classList.remove('on'); $('pkT').dataset.k = ''; }; lockPick(p); p.classList.add('on');
 }
 let rlTo = 0;

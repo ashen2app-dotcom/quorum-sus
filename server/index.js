@@ -37,7 +37,10 @@ wss.on('connection', ws => {
     if (!m || typeof m.t !== 'string') return;
     if (!c.p) {
       if (m.t === 'create') { const room = makeRoom(); const r = room.join(ws, m.name, m.look); bind({ ...r, room }); }
-      else if (m.t === 'join') { const room = rooms.get(String(m.code || '').toUpperCase()); if (!room) return err('Sala não encontrada.'); bind({ ...room.join(ws, m.name, m.look), room }); }
+      else if (m.t === 'train') { // treinamento: sala privada de 1 pessoa, bots parados e computador para escolher a profissão
+        const room = makeRoom(); room.training = true; room.pub = false; Object.assign(room.settings, { bot_on: 1, bot_n: 9, emergCd: 0, neutrals: 0, emergencies: 3 });
+        const r = room.join(ws, m.name, m.look); bind({ ...r, room }); if (r.p) { room.syncBots(); room.start(r.p); }
+      } else if (m.t === 'join') { const room = rooms.get(String(m.code || '').toUpperCase()); if (!room) return err('Sala não encontrada.'); bind({ ...room.join(ws, m.name, m.look), room }); }
       else if (m.t === 'quick') {
         const room = [...rooms.values()].find(r => r.pub && r.phase === 'lobby' && r.players.size < 15) || (() => { const r = makeRoom(); r.pub = true; return r; })();
         bind({ ...room.join(ws, m.name, m.look), room });

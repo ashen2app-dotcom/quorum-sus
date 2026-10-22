@@ -27,6 +27,7 @@
     <button id="bUse" class="main">USAR<small>E</small></button>
   </div>
   <button id="bFull" aria-label="Tela cheia">⛶</button>
+  <button id="bTrainX" class="hide">SAIR DO TREINO</button>
   <div id="sabMenu" class="hide"><button data-s="lights">Apagão</button><button data-s="comms">Comunicação</button><button data-s="heat">Superaquecimento</button></div>
 </div>
 
@@ -35,8 +36,9 @@
 <section id="menu" class="screen on">
   <div class="logo"><h1>QUÓRUM</h1><p>Estação Halcyon</p></div>
   <div class="stack">
-    <input id="nameIn" maxlength="12" placeholder="Seu nome" autocomplete="off">
+    <input id="nameIn" name="q_apelido" maxlength="12" placeholder="Seu nome" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" data-lpignore="true" data-form-type="other">
     <button class="btn main" id="mPlay">JOGAR</button>
+    <button class="btn" id="mTrain">TREINAMENTO</button>
     <button class="btn" id="mCreate">CRIAR SALA</button>
     <button class="btn" id="mJoin">ENTRAR EM SALA</button>
     <button class="btn" id="mCustom">PERSONALIZAÇÃO</button>
@@ -75,7 +77,8 @@
 <div id="joyZone" class="hide"><div id="joyBase"><i id="joyKnob"></i></div></div>
 <div id="rot">📱 Gire o celular para jogar na horizontal</div>
 <div id="roul"></div>
-<div id="ver">v2.0</div>
+<div id="prophet"></div>
+<div id="ver">v2.5</div>
 <div id="intro"></div><div id="task"></div><div id="toast"></div>
 <script type="module" src="js/main.js"></script>
 </body>

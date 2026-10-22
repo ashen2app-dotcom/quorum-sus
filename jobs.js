@@ -50,6 +50,7 @@ export const JOBS = [
   j('trocador', 'Trocador', 'neu', '#aab0bd', 'Troca de profissão com outro jogador vivo. Se trocar com um Impostor, morre logo depois da troca.', 40, 1),
   j('seguranca', 'Segurança', 'neu', '#2f7bff', 'Protege um jogador (de qualquer equipe): se o protegido morrer por qualquer motivo, o Segurança morre. Vence junto com o time do protegido (inocente, impostor ou o neutro que vencer). Atira como o Xerife e vê as câmeras de qualquer lugar.', 40, 1),
   j('jackpot', 'Jackpot', 'neu', '#3ddc5a', 'Vence sozinho matando todos. A cada rodada uma roleta sorteia: Assassino, Velocidade ou Escudo do Anjo. Enquanto vive, os inocentes não vencem; se morrer, a partida segue normal.', 40, 1),
+  { ...j('profeta', 'Profeta', 'inn', '#4aa8ff', 'Radar de profissões (ativo), Sentido da Morte (avisa quem morreu e a profissão) e Escudo de Pressentimento (escudo quando um Impostor/Neutro chega perto).', 40, 1), color2: '#ffffff' },
   j('sabio', 'Sábio', 'inn', '#3c8dff', 'Consulta as profissões presentes na partida e, ao concluir as tarefas, vê quais ainda têm jogadores vivos.', 40, 1),
 ];
 export const JOB = Object.fromEntries(JOBS.map(x => [x.id, x]));
@@ -88,6 +89,7 @@ const PARAMS_RAW = [
   P('swp_cd', 'Trocador: recarga da troca (s)', 5, 120, 5, 30, 'Trocador'), P('swp_uses', 'Trocador: trocas por partida', 1, 3, 1, 1, 'Trocador'),
   P('seg_mode', 'Segurança: protegido (0 = sorteado, 1 = o próprio Segurança escolhe)', 0, 1, 1, 0, 'Segurança'),
   P('jp_w_kill', 'Jackpot: chance da roleta — Assassino', 0, 100, 5, 35, 'Jackpot'), P('jp_w_speed', 'Jackpot: chance da roleta — Velocidade', 0, 100, 5, 35, 'Jackpot'), P('jp_w_shield', 'Jackpot: chance da roleta — Escudo do Anjo', 0, 100, 5, 35, 'Jackpot'),
+  P('pro_cd', 'Profeta: recarga do radar (s)', 0, 120, 5, 20, 'Profeta'), P('pro_range', 'Profeta: alcance do Escudo de Pressentimento (px)', 100, 600, 10, 260, 'Profeta'),
   P('ph_tasks', 'Phantom: tarefas para vencer', 1, 20, 1, 12, 'Phantom'), P('ph_hid', 'Phantom: tempo oculto (s)', 5, 60, 1, 20, 'Phantom'), P('ph_vis', 'Phantom: tempo visível (s)', 3, 30, 1, 10, 'Phantom'),
 ];
 export const PARAMS = PARAMS_RAW.filter((p, i, a) => a.findIndex(q => q.k === p.k) === i); // chaves únicas
@@ -105,7 +107,7 @@ export const ABIL = {
   phantom: [], redjohn: [['rjinv', 'INVESTIGAR'], ['zoom', 'ZOOM']], samurai: [['armor', 'ARMADURA']], dexter: [['bag', 'ENSACAR'], ['drop', 'SOLTAR']],
   medico: [['mcarry', 'PEGAR'], ['mdrop', 'SOLTAR'], ['revive', 'REVIVER']], lovers: [['lovfind', 'DESCOBRIR']],
   inquisidor: [['inq', 'ADIVINHAR']], sabotador: [['trap', 'ARMADILHA']], chuck: [['poss', 'POSSUIR']], bombardeiro: [['bomb', 'BOMBA']], ninja: [['shuriken', 'SHURIKEN']], faxineiro: [['clean', 'LIMPAR']],
-  trocador: [['swap', 'TROCAR']], seguranca: [['skill', 'ATIRAR'], ['cam', 'CÂMERAS'], ['protect', 'PROTEGER']], jackpot: [['jpinfo', 'ROLETA']], sabio: [['sage', 'PAINEL']],
+  trocador: [['swap', 'TROCAR']], profeta: [['radar', '📡 RADAR']], seguranca: [['skill', 'ATIRAR'], ['cam', 'CÂMERAS'], ['protect', 'PROTEGER']], jackpot: [['jpinfo', 'ROLETA']], sabio: [['sage', 'PAINEL']],
   anjo: [['shield', 'ESCUDO']], influencer: [['infmsg', 'MENSAGEM']], metamorfo: [['morph', 'TRANSFORMAR']], espectro: [['invis', 'INVISIBILIDADE']],
 };
 export const INF_MSGS = [['tone', 'Cor de quem me matou'], ['job', 'Profissão de quem me matou'], ['where', 'Onde fui morto']];
@@ -127,7 +129,8 @@ for (const x of BOT_PARAMS) { DEFAULT_SETTINGS[x.k] = x.def; SETTING_LIMITS[x.k]
 
 // v1.5: aplica a cor do nome da profissão a um elemento (Médico usa gradiente vermelho→azul).
 export function paintJob(el, j) {
-  if (j && j.color2) { el.style.background = `linear-gradient(90deg,${j.color},${j.color2})`; el.style.webkitBackgroundClip = 'text'; el.style.backgroundClip = 'text'; el.style.webkitTextFillColor = 'transparent'; el.style.color = 'transparent'; }
+  if (j && j.color2) { el.style.background = `linear-gradient(90deg,${j.color},${j.color2})`; if (j.color2 === '#ffffff') el.style.filter = 'drop-shadow(0 0 1px rgba(8,20,50,.95)) drop-shadow(0 0 2px rgba(8,20,50,.6))'; // azul+branco: contorno escuro para ler em fundo claro e escuro
+     el.style.webkitBackgroundClip = 'text'; el.style.backgroundClip = 'text'; el.style.webkitTextFillColor = 'transparent'; el.style.color = 'transparent'; }
   else el.style.color = !j ? '' : j.color === '#111419' ? '#e9f1ff' : j.color;
 }
 

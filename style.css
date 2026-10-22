@@ -274,3 +274,20 @@ body.touch .jhead .gear{width:44px;height:44px}
 body.touch #jBody{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
 body.touch #pkL{grid-template-columns:1fr}
 body.touch #pkL .pk{min-height:46px;font-size:15px}
+
+/* ---- tarefas: cartão inteiro visível, sem rolagem (o JS reduz a escala para caber) ---- */
+#task .card{max-height:none!important;overflow:visible!important;transform-origin:center center}
+#task{overflow:hidden;touch-action:none}
+#task .card input[type=range],#task .card button,#task .card svg,#task .card .swp{touch-action:manipulation}
+@media (max-height:520px){#task .card{padding:8px!important}#task .card .hint{margin:3px 0;font-size:13px}#task .card .ttl{margin-bottom:4px}}
+
+/* ---- v2.5: Profeta ---- */
+#prophet{position:fixed;right:calc(8px + env(safe-area-inset-right,0px));top:44%;z-index:41;display:flex;flex-direction:column;gap:5px;max-width:min(230px,42vw);pointer-events:none}
+#prophet .pn{background:rgba(10,16,36,.82);border:1px solid rgba(124,196,255,.35);border-left:4px solid #7cc4ff;border-radius:10px;padding:5px 8px;font-size:12px;line-height:1.25;color:#e9f1ff;animation:pnIn .25s ease-out}
+#prophet .pn small{display:block;font-size:10px;color:#9fb2d8;letter-spacing:.4px}
+@keyframes pnIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+#pick.radar .card::before{content:'';display:block;width:54px;height:54px;margin:0 auto 6px;border-radius:50%;border:2px solid #7cc4ff;background:conic-gradient(from 0deg,rgba(124,196,255,.0) 0 70%,rgba(124,196,255,.65));animation:radarSweep 1.6s linear infinite}
+@keyframes radarSweep{to{transform:rotate(360deg)}}
+body.radarPing #hud #abil button:first-child{box-shadow:0 0 0 3px rgba(124,196,255,.7);transition:box-shadow .9s}
+body.touch #prophet{top:50%;max-width:38vw}
+@media (max-height:420px){#prophet .pn{font-size:11px;padding:3px 6px}}

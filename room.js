@@ -18,7 +18,7 @@ const FREEZABLE = new Set(FREEZ);
 const ROOM_BY = Object.fromEntries(ROOMS.map(r => [r.id, r]));
 const PH_R = 230, LIGHTER_R = 110, GHOST_JOBS = ['anjo', 'influencer', 'phantom'];
 // v2.0
-const BOMB_SPEED = 520, POSS_R = 220, SWAP_R = 180, THROW_R = 260, SHUR_HIT = 22, SEG_PICK = 30, SPEED_JP = 2;
+const PRO_SHIELD = 900, BOMB_SPEED = 520, POSS_R = 220, SWAP_R = 180, THROW_R = 260, SHUR_HIT = 22, SEG_PICK = 30, SPEED_JP = 2;
 const KILL_JOBS = ['xerife', 'mentalista', 'policial', 'seguranca'];
 const POSS_BLOCK = new Set(['taskStart', 'taskDone', 'fix']); const POSS_VIA = new Set(['report', 'emergency', 'vent']); // com a possessão, report/emergência/duto passam a valer pelo corpo do possuído; // ações ligadas ao corpo real de Chuck, bloqueadas durante a possessão // quem tem o TIRO (mesma mecânica do Xerife)
 const rnd = n => Math.floor(Math.random() * n);
@@ -57,6 +57,7 @@ export class Room {
     this.send(p, { t: 'hello', id: p.id, token: p.token, code: this.code });
     if (this.phase === 'lobby') this.lobby(); else this.send(p, { t: 'resume', ...this.startPayload(p), phase: this.phase, timer: Math.ceil(this.timer), meet: this.meet && { ...this.meet, voted: this.list.filter(q => q.voted).map(q => q.id) } });
     if (this.phase !== 'lobby' && p.job === 'sabio') this.pushSage(p);
+    if (this.phase !== 'lobby' && p.job === 'profeta' && p.pLog.length) this.send(p, { t: 'prophetLog', list: p.pLog });
     return p;
   }
   mk(ws, name, look) { return { id: this.nextId++, token: crypto.randomBytes(12).toString('hex'), name: sanitizeName(name), look: sanitizeLook(look), ws,
@@ -64,7 +65,7 @@ export class Room {
       vote: null, voted: false, chatAt: 0, dcAt: 0, gone: false, cd: {}, act: {}, uses: {}, shieldT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
       killedBy: null, deathRoom: '', target: null, seen: new Set(), revealed: false, sciWait: false, watch: false,
       armor: 0, bank: 0, voteW: 1, inf: false, fuel: false, hasLighter: false, phT: 0, phLost: false, phTasks: [], frzSel: [], carry: null, carryT: 0, lover: null, medRev: false,
-      poss: null, possBy: null, clean: null, prot: null, allyImp: false, jpAb: null, jpSh: false, swapped: false, job0: null, sageOn: false }; }
+      poss: null, possBy: null, clean: null, prot: null, allyImp: false, jpAb: null, jpSh: false, swapped: false, job0: null, sageOn: false, pSh: false, pLog: [] }; }
   botCount() { const S = this.settings; return S.bot_on ? Math.max(0, Math.min(S.bot_n, MAX_PLAYERS - this.humansList().length)) : 0; }
   botNameList(nb) {
     const taken = new Set(this.list.map(q => q.name.toLowerCase())), out = [];
@@ -160,7 +161,7 @@ export class Room {
     ps.forEach((q, i) => {
       const a = (i / n) * Math.PI * 2;
       Object.assign(q, { alive: true, x: SPECIAL.spawn.x + Math.cos(a) * 85, y: SPECIAL.spawn.y + Math.sin(a) * 60, ix: 0, iy: 0, vent: -1, killCd: (q.job === 'ninja' ? S.nin_killcd : 10) + INTRO, emerg: 0, vote: null, voted: false, ts: {}, gone: false,
-        ghostJob: null, cd: KILL_JOBS.includes(q.job) ? { skill: 10 + INTRO } : {}, act: {}, uses: { panel: S.cie_uses, inf: S.inf_uses, tl: S.tl_uses, rj: S.rj_uses, med: S.med_uses, inq: S.inq_tries, swp: S.swp_uses }, shieldT: 0, armor: q.job === 'samurai' ? S.sam_armor : 0, bank: 0, voteW: 1, inf: false, fuel: false, hasLighter: false, phT: 0, phLost: false, phTasks: [], frzSel: [], carry: null, carryT: 0, medRev: false, poss: null, possBy: null, clean: null, prot: null, allyImp: false, jpAb: null, jpSh: false, swapped: false, job0: q.job, sageOn: false, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
+        ghostJob: null, cd: KILL_JOBS.includes(q.job) ? { skill: 10 + INTRO } : {}, act: {}, uses: { panel: S.cie_uses, inf: S.inf_uses, tl: S.tl_uses, rj: S.rj_uses, med: S.med_uses, inq: S.inq_tries, swp: S.swp_uses }, shieldT: 0, armor: q.job === 'samurai' ? S.sam_armor : 0, bank: 0, voteW: 1, inf: false, fuel: false, hasLighter: false, phT: 0, phLost: false, phTasks: [], frzSel: [], carry: null, carryT: 0, medRev: false, poss: null, possBy: null, clean: null, prot: null, allyImp: false, jpAb: null, jpSh: false, swapped: false, job0: q.job, sageOn: false, pSh: false, pLog: [], morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
         killedBy: null, deathRoom: '', seen: new Set(), revealed: false, sciWait: false, watch: false,
         tasks: q.team === 'neu' ? [] : shuffle([...STATIONS]).slice(0, S.tasks).map(s => ({ id: s.id, type: s.type, name: s.name, room: s.room, done: false })) });
     });
@@ -704,6 +705,11 @@ export class Room {
         if (J !== 'seguranca' || !p.alive || p.prot != null || ph === 'lobby' || ph === 'end') return;
         const t = tgt(); if (!t) return bad('Escolha um jogador vivo.'); this.setProt(p, t.id, true); break;
       }
+      case 'radar': { // Profeta: profissões presentes (sem nomes de jogadores), com a categoria real de cada uma
+        if (J !== 'profeta' || !p.alive || ph === 'lobby' || ph === 'end') return;
+        if (p.cd.radar > 0) return bad(`Radar recarregando: ${Math.ceil(p.cd.radar)}s`);
+        p.cd.radar = S.pro_cd; this.send(p, { t: 'radar', list: this.radarList() }); break;
+      }
       case 'sage': if (J !== 'sabio' || !p.alive || ph === 'lobby' || ph === 'end') return; this.pushSage(p); break;
       case 'jpinfo': if (J !== 'jackpot' || !p.alive || !p.jpAb) return; this.send(p, { t: 'jproll', ab: p.jpAb, round: p.jpRound, again: 1 }); break;
       case 'invis':
@@ -845,6 +851,7 @@ export class Room {
     if (old === 'jackpot') { if (q.jpSh) q.shieldT = 0; q.jpSh = false; q.jpAb = null; }
     if (old === 'seguranca') { q.prot = null; q.allyImp = false; }
     if (old === 'execution') q.target = null;
+    if (old === 'profeta') { if (q.pSh) q.shieldT = 0; q.pSh = false; q.pLog = []; }
     if (old === 'chuck' && q.poss) this.endPoss(q, 'troca');
     Object.assign(q, { job, probe: null, track: null, morph: null, watch: false, hasLighter: false, frzSel: [], sageOn: false, revealed: false, supGiven: false, supLeft: 0, clean: null });
     this.initJobState(q);
@@ -876,10 +883,31 @@ export class Room {
   }
   pushSage(q) { this.send(q, { t: 'sage', unl: q.sageOn ? 1 : 0, list: this.sageList(q) }); }
   sageFlush() { this.sageDirty = false; for (const q of this.list) if (q.alive && !q.gone && q.job === 'sabio' && (q.ws || q.bot)) this.pushSage(q); }
+  // ---- Profeta ----
+  radarList() { // só quem tem ESTA sala/partida: conta profissões reais dos jogadores atuais; nunca expõe quem as possui
+    const cnt = new Map(); for (const x of this.list) cnt.set(x.job, (cnt.get(x.job) || 0) + 1);
+    const ord = { inn: 0, neu: 1, imp: 2 };
+    return [...cnt].map(([j, n]) => [j, n, JOB[j].team]).sort((a, b) => ord[a[2]] - ord[b[2]] || JOB[a[0]].name.localeCompare(JOB[b[0]].name, 'pt'));
+  }
+  prophetNotify(v, cause) { // Sentido da Morte: aviso privado, uma vez por morte real (desconexão não conta)
+    if (cause === 'saiu') return;
+    for (const q of this.list) if (q !== v && q.alive && !q.gone && q.job === 'profeta') {
+      const e = { id: v.id, name: v.name, job: v.job, team: JOB[v.job].team, at: Math.round(this.clockT) };
+      q.pLog.push(e); if (q.pLog.length > 40) q.pLog.shift(); this.send(q, { t: 'prophet', ...e });
+    }
+  }
+  prophetShield(dt) { // Escudo de Pressentimento: Impostor/Neutro (profissão) por perto, posições reais, uma ativação por rodada
+    const R = this.settings.pro_range;
+    for (const p of this.list) {
+      if (p.job !== 'profeta' || !p.alive || p.gone || p.pSh || p.vent >= 0) continue;
+      const near = this.list.some(q => q !== p && q.alive && !q.gone && q.vent < 0 && JOB[q.job]?.team !== 'inn' && Math.hypot(q.x - p.x, q.y - p.y) <= R);
+      if (near) { p.pSh = true; p.shieldT = Math.max(p.shieldT, PRO_SHIELD); this.send(p, { t: 'shield', pro: 1, dur: 0 }); }
+    }
+  }
   // ---- hooks gerais ----
   maybeFinishVote() { if (this.phase === 'vote' && this.alive().every(q => q.voted || (!q.ws && !q.bot))) this.finishVote(); }
   afterDeath(v, who, cause) { // consequências de QUALQUER morte (uma única vez por jogador: slay só roda para quem está vivo)
-    this.sageDirty = true;
+    this.sageDirty = true; this.prophetNotify(v, cause);
     if (v.poss) this.endPoss(v, 'Chuck morreu');
     for (const c of this.list) if (c.poss && c.poss.id === v.id) this.endPoss(c, 'alvo morreu');
     v.clean = null; v.possBy = null;
@@ -891,7 +919,7 @@ export class Room {
   }
   onGone(p) { this.afterDeath(p, null, 'saiu'); }
   v2Tick(dt) {
-    const S = this.settings; this.shurTick(dt); if (this.phase !== 'play') return;
+    const S = this.settings; this.shurTick(dt); if (this.phase !== 'play') return; this.prophetShield(dt);
     for (let i = this.bombs.length - 1; i >= 0; i--) {
       const b = this.bombs[i], o = this.players.get(b.by);
       if (!o || !o.alive || o.gone) { this.bombs.splice(i, 1); continue; } // invalidada: o dono morreu
@@ -947,6 +975,7 @@ export class Room {
 
   // ---------- reuniões ----------
   meeting(by, reason, bodyId = null) {
+    for (const p of this.list) if (p.pSh) { p.pSh = false; p.shieldT = 0; this.send(p, { t: 'shieldOff' }); } // o escudo do Profeta acaba na reunião e só volta com nova proximidade
     this.endAllPoss('meeting'); this.shurs = []; if (this.bombs.length) { this.bombs = []; this.all({ t: 'bombsOff' }); } // bombas e possessões não atravessam reuniões
     for (const p of this.list) { p.clean = null; if (p.uses) p.uses.inq = this.settings.inq_tries; }
     const bd = bodyId != null ? this.bodies.find(b => b.id === bodyId) : null;
@@ -1021,10 +1050,8 @@ export class Room {
     const jp = this.list.find(q => q.alive && !q.gone && q.job === 'jackpot');
     if (jp && this.alive().every(q => q === jp)) return this.end('jackpot', `${jp.name} (Jackpot) eliminou todo mundo e venceu sozinho!`, jp.id);
     if (imp > 0 && imp >= crew) return this.end('imp', 'Os impostores dominam a votação.');
-    if (!jp) { // com um Jackpot vivo os inocentes não vencem: a partida continua até ele morrer (ou vencer)
-      if (imp === 0) return this.end('crew', 'Todos os impostores foram eliminados.');
-      if (t > 0 && d >= t) return this.end('crew', 'Todas as tarefas foram concluídas.');
-    }
+    if (t > 0 && d >= t) return this.end('crew', 'Todas as tarefas foram concluídas.'); // tarefas completas encerram a partida mesmo com Jackpot vivo
+    if (!jp && imp === 0) return this.end('crew', 'Todos os impostores foram eliminados.'); // com Jackpot vivo, eliminar os impostores não encerra: ele continua
     return false;
   }
   end(winner, reason, who = null) {
@@ -1037,7 +1064,7 @@ export class Room {
   }
   toLobby() {
     clearInterval(this.loop); this.loop = null;
-    for (const p of [...this.players.values()]) { if (!p.ws || p.gone) this.players.delete(p.id); else Object.assign(p, { role: null, team: null, job: null, ghostJob: null, alive: true, tasks: [], phTasks: [], vent: -1, act: {}, cd: {}, morph: null, armor: 0, bank: 0, inf: false, fuel: false, hasLighter: false, carry: null, frzSel: [], lover: null, medRev: false, poss: null, possBy: null, clean: null, prot: null, allyImp: false, jpAb: null, jpSh: false, swapped: false, job0: null, sageOn: false }); }
+    for (const p of [...this.players.values()]) { if (!p.ws || p.gone) this.players.delete(p.id); else Object.assign(p, { role: null, team: null, job: null, ghostJob: null, alive: true, tasks: [], phTasks: [], vent: -1, act: {}, cd: {}, morph: null, armor: 0, bank: 0, inf: false, fuel: false, hasLighter: false, carry: null, frzSel: [], lover: null, medRev: false, poss: null, possBy: null, clean: null, prot: null, allyImp: false, jpAb: null, jpSh: false, swapped: false, job0: null, sageOn: false, pSh: false, pLog: [] }); }
     if (!this.players.has(this.hostId)) this.hostId = this.humansList()[0]?.id ?? null;
     Object.assign(this, { phase: 'lobby', bodies: [], sab: null, meet: null, frozen: new Set(), lighter: null, hist: [], pair: null, bombs: [], shurs: [], traps: new Map(), deaths: [], round: 0 });
     if (this.humansList().length) { this.syncBots(); this.lobby(); } else this.destroy();

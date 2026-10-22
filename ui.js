@@ -262,7 +262,8 @@ export function markDead(id) { const c = M.cards.get(id); if (!c || c.classList.
 export function setAlive(v) { if (M.ctx) M.ctx.alive = v; if (!v) { $('mVote').disabled = true; $('mSkip').disabled = true; } }
 export function pickInfo(title, lines, key) { // painel só de leitura
   const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; $('pkT').dataset.k = key || ''; l.innerHTML = '';
-  lines.forEach((t, i) => { const b = el(i === 0 ? 'p' : 'button', i === 0 ? 'hint' : 'pk', t); if (i) b.disabled = true; l.append(b); });
+  lines.forEach((t, i) => { const txt = typeof t === 'string' ? t : t.t, b = el(i === 0 ? 'p' : 'button', i === 0 ? 'hint' : 'pk', txt); if (t.c) b.style.color = t.c; if (i) b.disabled = true; l.append(b); }); // t pode ser {t, c}: texto + cor da categoria
+  p.classList.toggle('radar', key === 'radar');
   $('pkX').onclick = () => { p.classList.remove('on'); $('pkT').dataset.k = ''; }; lockPick(p); p.classList.add('on');
 }
 let rlTo = 0;
